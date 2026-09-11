@@ -108,7 +108,7 @@ def build_exercise_group_picker(groups: list[MuscleGroup]) -> InputRichMessage:
         ]
         rows.append(f'<tg-button-row align="left">{"".join(buttons)}</tg-button-row>')
     return simple_rich(
-        "Новое упражнение · 1/5",
+        "Новое упражнение · 1/7",
         "<p>Для какой группы мышц добавить упражнение?</p>",
         "".join(rows),
     )
@@ -137,7 +137,9 @@ def build_exercises_message(exercises: list[Exercise]) -> InputRichMessage:
                 f'<tr><td><b>{escape(exercise.name)}</b></td><td align="right">{exercise.default_sets} подх.</td></tr>'
                 f'<tr><td>{escape(exercise.target_text)}</td><td align="right">{rest}</td></tr>'
                 "</table>"
-                f'<tg-button-row align="right"><tg-button type="callback_data" style="danger" data="exercise:delete:{exercise.id}">Удалить</tg-button></tg-button-row>'
+                f'<tg-button-row align="right"><tg-button type="callback_data" data="exercise:details:{exercise.id}">Посмотреть</tg-button>'
+                f'<tg-button type="callback_data" data="exercise:content:{exercise.id}">Описание и медиа</tg-button>'
+                f'<tg-button type="callback_data" style="danger" data="exercise:delete:{exercise.id}">Удалить</tg-button></tg-button-row>'
             )
     blocks.append(
         '<tg-button-row><tg-button type="callback_data" style="primary" data="exercise:new">+ Добавить упражнение</tg-button></tg-button-row>'
@@ -266,6 +268,9 @@ def _set_buttons(workout_session: WorkoutSession) -> str:
                 buttons.append(
                     f'<tg-button type="callback_data" style="primary" data="workout:set:{workout_set.id}">{workout_set.position}</tg-button>'
                 )
+        blocks.append(
+            f'<tg-button-row align="left"><tg-button type="callback_data" data="exercise:details:{item.exercise_id}">Описание и медиа</tg-button></tg-button-row>'
+        )
         for offset in range(0, len(buttons), 6):
             blocks.append(
                 f'<tg-button-row align="left">{"".join(buttons[offset : offset + 6])}</tg-button-row>'

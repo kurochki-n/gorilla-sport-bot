@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     Time,
     UniqueConstraint,
 )
@@ -67,6 +68,9 @@ class Exercise(Base, TimestampMixin):
         ForeignKey("muscle_groups.id", ondelete="RESTRICT"), index=True
     )
     name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    media_file_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    media_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     default_sets: Mapped[int] = mapped_column(Integer, default=3)
     target_text: Mapped[str] = mapped_column(String(100), default="8–12 повторений")
     rest_seconds: Mapped[int] = mapped_column(Integer, default=90)

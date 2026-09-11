@@ -29,9 +29,15 @@ from database.repositories import (
     get_training_day,
     mark_workout_set_done,
     reset_statistics,
+    update_exercise_content,
     upsert_user,
 )
-from handlers.states import CreateExercise, CreateMuscleGroup, CreateTrainingDay
+from handlers.states import (
+    CreateExercise,
+    CreateMuscleGroup,
+    CreateTrainingDay,
+    EditExerciseContent,
+)
 from services.rich_messages import (
     build_day_groups_picker,
     build_exercise_delete_confirmation,
@@ -393,7 +399,7 @@ async def exercise_choose_group(
             callback.message.chat.id,
             callback.message.message_id,
             simple_rich(
-                "Новое упражнение · 2/5",
+                "Новое упражнение · 2/7",
                 f"<p>Группа: <b>{escape(group.name)}</b></p><p>Отправь название упражнения.</p>"
                 "<p><i>Например: Тяга верхнего блока.</i></p>",
             ),
@@ -421,7 +427,7 @@ async def exercise_name(message: Message, state: FSMContext) -> None:
     await send_screen(
         message,
         simple_rich(
-            "Новое упражнение · 3/5",
+            "Новое упражнение · 3/7",
             "<p>Сколько подходов выполнять по умолчанию?</p>",
             f'<tg-button-row align="left">{buttons}</tg-button-row>',
         ),
@@ -442,7 +448,7 @@ async def exercise_sets(callback: CallbackQuery, state: FSMContext) -> None:
             callback.message.chat.id,
             callback.message.message_id,
             simple_rich(
-                "Новое упражнение · 4/5",
+                "Новое упражнение · 4/7",
                 "<p>Отправь цель одного подхода.</p>"
                 "<p><i>Например: 8–12 повторений, 10 повторений, 40 секунд.</i></p>",
             ),
@@ -466,7 +472,7 @@ async def exercise_target(message: Message, state: FSMContext) -> None:
     await send_screen(
         message,
         simple_rich(
-            "Новое упражнение · 5/5",
+            "Новое упражнение · 5/7",
             "<p>Сколько отдыхать между подходами?</p>",
             '<tg-button-row align="left">'
             '<tg-button type="callback_data" data="exercise:rest:60">60 сек</tg-button>'
@@ -479,42 +485,177 @@ async def exercise_target(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(CreateExercise.rest, F.data.startswith("exercise:rest:"))
-async def exercise_rest(
-    callback: CallbackQuery, state: FSMContext, session: AsyncSession
-) -> None:
+async def exercise_rest(callback: CallbackQuery, state: FSMContext) -> None:
     rest_seconds = int(callback.data.rsplit(":", 1)[1])
-    data = await state.get_data()
-    group = await get_muscle_group(
-        session, callback.from_user.id, int(data["muscle_group_id"])
+    if rest_seconds not in {60, 90, 120, 180}:
+        await callback.answer("Недопустимое время отдыха", show_alert=True)
+        return
+    await state.update_data(rest_seconds=rest_seconds)
+    await state.set_state(CreateExercise.description)
+    if callback.message:
+        await edit_rich(
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            simple_rich(
+                "Новое упражнение · 6/7",
+                "<p>Отправь описание техники, подсказки или важные замечания.</p>"
+                "<p><i>До 800 символов. Этот шаг можно пропустить.</i></p>",
+                '<tg-button-row><tg-button type="callback_data" data="exercise:description:skip">Пропустить</tg-button></tg-button-row>',
+            ),
+        )
+    await callback.answer()
+
+
+def exercise_media_prompt():
+    return simple_rich(
+        "Новое упражнение · 7/7",
+        "<p>Отправь одно фото, видео или GIF с техникой выполнения.</p>"
+        "<p><i>Медиа сохранится в Telegram, поэтому бот не скачивает файл на сервер.</i></p>",
+        '<tg-button-row><tg-button type="callback_data" data="exercise:media:skip">Без медиа</tg-button></tg-button-row>',
     )
+
+
+@router.message(CreateExercise.description)
+async def exercise_description(message: Message, state: FSMContext) -> None:
+    description = (message.text or "").strip()
+    if not 1 <= len(description) <= 800:
+        await send_screen(
+            message,
+            simple_rich(
+                "Не подходит",
+                "<p>Описание должно быть текстом длиной от 1 до 800 символов.</p>",
+            ),
+        )
+        return
+    await state.update_data(description=description)
+    await state.set_state(CreateExercise.media)
+    await send_screen(message, exercise_media_prompt())
+
+
+@router.callback_query(
+    CreateExercise.description, F.data == "exercise:description:skip"
+)
+async def exercise_description_skip(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(description=None)
+    await state.set_state(CreateExercise.media)
+    if callback.message:
+        await edit_rich(
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            exercise_media_prompt(),
+        )
+    await callback.answer()
+
+
+async def finish_exercise_creation(
+    bot,
+    chat_id: int,
+    user_id: int,
+    state: FSMContext,
+    session: AsyncSession,
+    media_file_id: str | None = None,
+    media_type: str | None = None,
+):
+    data = await state.get_data()
+    group = await get_muscle_group(session, user_id, int(data["muscle_group_id"]))
     if group is None or not group.is_active:
         await state.clear()
-        await callback.answer("Группа была удалена", show_alert=True)
-        return
+        await send_rich(
+            bot,
+            chat_id,
+            simple_rich("Группа удалена", "<p>Начни добавление заново.</p>"),
+        )
+        return None
+
     exercise = await create_exercise(
         session,
-        callback.from_user.id,
+        user_id,
         group.id,
         data["name"],
         int(data["default_sets"]),
         data["target_text"],
-        rest_seconds,
+        int(data["rest_seconds"]),
+        data.get("description"),
+        media_file_id,
+        media_type,
     )
     await state.clear()
-    result = simple_rich(
+    media_status = "медиа добавлено" if media_file_id else "без медиа"
+    return simple_rich(
         "Упражнение добавлено",
         f"<p><b>{escape(exercise.name)}</b><br>{escape(group.name)} · {exercise.default_sets} × "
-        f"{escape(exercise.target_text)} · отдых {exercise.rest_seconds} сек</p>",
+        f"{escape(exercise.target_text)} · отдых {exercise.rest_seconds} сек</p>"
+        f"<p>Описание: {'добавлено' if exercise.description else 'не добавлено'} · {media_status}</p>",
         '<tg-button-row><tg-button type="callback_data" style="primary" data="exercise:new">Добавить ещё</tg-button>'
         '<tg-button type="callback_data" data="exercise:list">Все упражнения</tg-button></tg-button-row>',
     )
-    if callback.message:
-        await edit_rich(
-            callback.bot, callback.message.chat.id, callback.message.message_id, result
+
+
+def extract_exercise_media(message: Message) -> tuple[str | None, str | None]:
+    if message.photo:
+        return message.photo[-1].file_id, "photo"
+    if message.video:
+        return message.video.file_id, "video"
+    if message.animation:
+        return message.animation.file_id, "animation"
+    if message.document and message.document.mime_type == "image/gif":
+        return message.document.file_id, "document"
+    return None, None
+
+
+@router.message(CreateExercise.media)
+async def exercise_media(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    media_file_id, media_type = extract_exercise_media(message)
+    if media_file_id is None:
+        await send_screen(
+            message,
+            simple_rich(
+                "Нужен файл",
+                "<p>Отправь фото, видео или GIF либо нажми «Без медиа».</p>",
+                '<tg-button-row><tg-button type="callback_data" data="exercise:media:skip">Без медиа</tg-button></tg-button-row>',
+            ),
         )
-    else:
-        await send_rich(callback.bot, callback.from_user.id, result)
-    await callback.answer("Добавлено")
+        return
+
+    result = await finish_exercise_creation(
+        message.bot,
+        message.chat.id,
+        message.from_user.id,
+        state,
+        session,
+        media_file_id,
+        media_type,
+    )
+    if result is not None:
+        await send_screen(message, result)
+
+
+@router.callback_query(CreateExercise.media, F.data == "exercise:media:skip")
+async def exercise_media_skip(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    result = await finish_exercise_creation(
+        callback.bot,
+        callback.from_user.id,
+        callback.from_user.id,
+        state,
+        session,
+    )
+    if result is not None:
+        if callback.message:
+            await edit_rich(
+                callback.bot,
+                callback.message.chat.id,
+                callback.message.message_id,
+                result,
+            )
+        else:
+            await send_rich(callback.bot, callback.from_user.id, result)
+    await callback.answer("Добавлено" if result is not None else "Группа удалена")
 
 
 @router.message(Command("exercises"))
@@ -536,6 +677,200 @@ async def exercises_list_callback(
             build_exercises_message(exercises),
         )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("exercise:details:"))
+async def exercise_details(callback: CallbackQuery, session: AsyncSession) -> None:
+    exercise_id = int(callback.data.rsplit(":", 1)[1])
+    exercise = await get_exercise(session, callback.from_user.id, exercise_id)
+    if exercise is None:
+        await callback.answer("Упражнение не найдено", show_alert=True)
+        return
+
+    description = exercise.description or "Описание не добавлено."
+    caption = (
+        f"<b>{escape(exercise.name)}</b>\n"
+        f"<i>{escape(exercise.muscle_group.name)}</i>\n\n"
+        f"{escape(description)}\n\n"
+        f"{exercise.default_sets} × {escape(exercise.target_text)} · "
+        f"отдых {exercise.rest_seconds} сек"
+    )
+    if exercise.media_type == "photo" and exercise.media_file_id:
+        await callback.bot.send_photo(
+            callback.from_user.id, exercise.media_file_id, caption=caption
+        )
+    elif exercise.media_type == "video" and exercise.media_file_id:
+        await callback.bot.send_video(
+            callback.from_user.id, exercise.media_file_id, caption=caption
+        )
+    elif exercise.media_type == "animation" and exercise.media_file_id:
+        await callback.bot.send_animation(
+            callback.from_user.id, exercise.media_file_id, caption=caption
+        )
+    elif exercise.media_type == "document" and exercise.media_file_id:
+        await callback.bot.send_document(
+            callback.from_user.id, exercise.media_file_id, caption=caption
+        )
+    else:
+        await callback.bot.send_message(callback.from_user.id, caption)
+    await callback.answer()
+
+
+def edit_exercise_media_prompt():
+    return simple_rich(
+        "Изменить медиа · 2/2",
+        "<p>Отправь новое фото, видео или GIF.</p>",
+        '<tg-button-row><tg-button type="callback_data" data="exercise:edit_media:keep">Оставить текущее</tg-button>'
+        '<tg-button type="callback_data" data="exercise:edit_media:clear">Без медиа</tg-button></tg-button-row>',
+    )
+
+
+@router.callback_query(F.data.startswith("exercise:content:"))
+async def edit_exercise_content(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    exercise_id = int(callback.data.rsplit(":", 1)[1])
+    exercise = await get_exercise(session, callback.from_user.id, exercise_id)
+    if exercise is None or not exercise.is_active:
+        await callback.answer("Упражнение недоступно", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(
+        exercise_id=exercise.id,
+        description=exercise.description,
+        media_file_id=exercise.media_file_id,
+        media_type=exercise.media_type,
+    )
+    await state.set_state(EditExerciseContent.description)
+    current = (
+        f"<p>Сейчас: <i>{escape(exercise.description)}</i></p>"
+        if exercise.description
+        else "<p>Сейчас описания нет.</p>"
+    )
+    if callback.message:
+        await edit_rich(
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            simple_rich(
+                "Изменить описание · 1/2",
+                current + "<p>Отправь новый текст длиной до 800 символов.</p>",
+                '<tg-button-row><tg-button type="callback_data" data="exercise:edit_description:keep">Оставить текущее</tg-button>'
+                '<tg-button type="callback_data" data="exercise:edit_description:clear">Без описания</tg-button></tg-button-row>',
+            ),
+        )
+    await callback.answer()
+
+
+@router.message(EditExerciseContent.description)
+async def edit_exercise_description(message: Message, state: FSMContext) -> None:
+    description = (message.text or "").strip()
+    if not 1 <= len(description) <= 800:
+        await send_screen(
+            message,
+            simple_rich(
+                "Не подходит",
+                "<p>Описание должно быть текстом длиной от 1 до 800 символов.</p>",
+            ),
+        )
+        return
+    await state.update_data(description=description)
+    await state.set_state(EditExerciseContent.media)
+    await send_screen(message, edit_exercise_media_prompt())
+
+
+@router.callback_query(
+    EditExerciseContent.description, F.data.startswith("exercise:edit_description:")
+)
+async def edit_exercise_description_choice(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    choice = callback.data.rsplit(":", 1)[1]
+    if choice == "clear":
+        await state.update_data(description=None)
+    await state.set_state(EditExerciseContent.media)
+    if callback.message:
+        await edit_rich(
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            edit_exercise_media_prompt(),
+        )
+    await callback.answer()
+
+
+async def finish_exercise_content_edit(
+    user_id: int,
+    state: FSMContext,
+    session: AsyncSession,
+    media_file_id: str | None,
+    media_type: str | None,
+):
+    data = await state.get_data()
+    exercise = await update_exercise_content(
+        session,
+        user_id,
+        int(data["exercise_id"]),
+        data.get("description"),
+        media_file_id,
+        media_type,
+    )
+    await state.clear()
+    if exercise is None:
+        return simple_rich("Упражнение недоступно", "<p>Изменения не сохранены.</p>")
+    return simple_rich(
+        "Описание и медиа сохранены",
+        f"<p><b>{escape(exercise.name)}</b></p>",
+        '<tg-button-row><tg-button type="callback_data" data="exercise:list">Все упражнения</tg-button></tg-button-row>',
+    )
+
+
+@router.message(EditExerciseContent.media)
+async def edit_exercise_media(
+    message: Message, state: FSMContext, session: AsyncSession
+) -> None:
+    media_file_id, media_type = extract_exercise_media(message)
+    if media_file_id is None:
+        await send_screen(message, edit_exercise_media_prompt())
+        return
+    result = await finish_exercise_content_edit(
+        message.from_user.id,
+        state,
+        session,
+        media_file_id,
+        media_type,
+    )
+    await send_screen(message, result)
+
+
+@router.callback_query(
+    EditExerciseContent.media, F.data.startswith("exercise:edit_media:")
+)
+async def edit_exercise_media_choice(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    data = await state.get_data()
+    choice = callback.data.rsplit(":", 1)[1]
+    media_file_id = data.get("media_file_id") if choice == "keep" else None
+    media_type = data.get("media_type") if choice == "keep" else None
+    result = await finish_exercise_content_edit(
+        callback.from_user.id,
+        state,
+        session,
+        media_file_id,
+        media_type,
+    )
+    if callback.message:
+        await edit_rich(
+            callback.bot,
+            callback.message.chat.id,
+            callback.message.message_id,
+            result,
+        )
+    else:
+        await send_rich(callback.bot, callback.from_user.id, result)
+    await callback.answer("Сохранено")
 
 
 @router.callback_query(F.data.startswith("exercise:delete:"))

@@ -11,6 +11,13 @@ class CreateExercise(StatesGroup):
     sets = State()
     target = State()
     rest = State()
+    description = State()
+    media = State()
+
+
+class EditExerciseContent(StatesGroup):
+    description = State()
+    media = State()
 
 
 class CreateTrainingDay(StatesGroup):

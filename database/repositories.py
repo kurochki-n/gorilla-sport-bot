@@ -103,11 +103,17 @@ async def create_exercise(
     default_sets: int,
     target_text: str,
     rest_seconds: int,
+    description: str | None = None,
+    media_file_id: str | None = None,
+    media_type: str | None = None,
 ) -> Exercise:
     exercise = Exercise(
         user_id=user_id,
         muscle_group_id=muscle_group_id,
         name=name,
+        description=description,
+        media_file_id=media_file_id,
+        media_type=media_type,
         default_sets=default_sets,
         target_text=target_text,
         rest_seconds=rest_seconds,
@@ -115,6 +121,24 @@ async def create_exercise(
     session.add(exercise)
     await session.commit()
     await session.refresh(exercise)
+    return exercise
+
+
+async def update_exercise_content(
+    session: AsyncSession,
+    user_id: int,
+    exercise_id: int,
+    description: str | None,
+    media_file_id: str | None,
+    media_type: str | None,
+) -> Exercise | None:
+    exercise = await get_exercise(session, user_id, exercise_id)
+    if exercise is None or not exercise.is_active:
+        return None
+    exercise.description = description
+    exercise.media_file_id = media_file_id
+    exercise.media_type = media_type
+    await session.commit()
     return exercise
 
 
