@@ -168,7 +168,7 @@ async def start(message: Message, session: AsyncSession, state: FSMContext) -> N
         simple_rich(
             "Тренировки",
             "<p>Собери собственную библиотеку упражнений, настрой тренировочные дни и выбери упражнения для каждого из них — бот будет присылать их по расписанию.</p>",
-            '<tg-button-row><tg-button type="callback_data" style="primary" data="workout:today">Расписание</tg-button></tg-button-row>',
+            '<tg-button-row><tg-button type="callback_data" style="primary" data="day:list">Расписание</tg-button></tg-button-row>',
         ),
         reply_markup=ReplyKeyboardRemove(),
     )
