@@ -27,6 +27,7 @@ from database.repositories import (
     get_exercise,
     get_muscle_group,
     get_training_day,
+    get_workout_session,
     mark_workout_set_done,
     reset_statistics,
     switch_workout_exercise,
@@ -56,7 +57,8 @@ from services.rich_messages import (
     build_training_day_delete_confirmation,
     build_training_days_message,
     build_weekdays_message,
-    build_workout_dashboard,
+    build_workout_exercise,
+    build_workout_overview,
     edit_rich,
     send_rich,
     simple_rich,
@@ -1416,7 +1418,7 @@ async def start_training_day(
     sent = await send_rich(
         callback.bot,
         callback.from_user.id,
-        build_workout_dashboard(workout, current_streak),
+        build_workout_overview(workout, current_streak),
     )
     workout.telegram_message_id = sent.message_id
     workout.sent_at = datetime.now(timezone.utc)
@@ -1501,7 +1503,7 @@ async def show_today(bot, chat_id: int, user_id: int, session: AsyncSession) -> 
             await send_rich(bot, chat_id, build_invalid_workout_message(training_day))
             continue
         sent = await send_rich(
-            bot, chat_id, build_workout_dashboard(workout, current_streak)
+            bot, chat_id, build_workout_overview(workout, current_streak)
         )
         workout.telegram_message_id = sent.message_id
         if workout.sent_at is None and (now.hour, now.minute) >= (
@@ -1525,6 +1527,42 @@ async def today_callback(callback: CallbackQuery, session: AsyncSession) -> None
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("workout:begin:"))
+async def begin_workout(callback: CallbackQuery, session: AsyncSession) -> None:
+    workout_id = int(callback.data.rsplit(":", 1)[1])
+    workout = await get_workout_session(session, callback.from_user.id, workout_id)
+    if workout is None or not workout.exercises:
+        await callback.answer("Тренировка недоступна", show_alert=True)
+        return
+    current_streak, _ = await streaks(
+        session, callback.from_user.id, workout.scheduled_date
+    )
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_workout_exercise(workout, 1, current_streak),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("workout:nav:"))
+async def navigate_workout(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, workout_id, position = callback.data.split(":")
+    workout = await get_workout_session(session, callback.from_user.id, int(workout_id))
+    if workout is None:
+        await callback.answer("Тренировка недоступна", show_alert=True)
+        return
+    current_streak, _ = await streaks(
+        session, callback.from_user.id, workout.scheduled_date
+    )
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_workout_exercise(workout, int(position), current_streak),
+        )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("workout:replace:"))
 async def replace_workout_exercise(
     callback: CallbackQuery, session: AsyncSession
@@ -1539,10 +1577,13 @@ async def replace_workout_exercise(
     current_streak, _ = await streaks(
         session, callback.from_user.id, workout.scheduled_date
     )
+    position = next(
+        item.position for item in workout.exercises if item.id == workout_exercise_id
+    )
     if callback.message:
         await edit_rich(
             callback.bot, callback.message.chat.id, callback.message.message_id,
-            build_workout_dashboard(workout, current_streak),
+            build_workout_exercise(workout, position, current_streak),
         )
     await callback.answer("Упражнение заменено")
 
@@ -1572,7 +1613,9 @@ async def complete_set(callback: CallbackQuery, session: AsyncSession) -> None:
             callback.bot,
             callback.message.chat.id,
             callback.message.message_id,
-            build_workout_dashboard(workout, current_streak),
+            build_workout_exercise(
+                workout, exercise.position if exercise is not None else 1, current_streak
+            ),
         )
 
     if just_workout_completed:

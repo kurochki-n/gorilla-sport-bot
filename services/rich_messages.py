@@ -338,6 +338,76 @@ def _set_buttons(workout_session: WorkoutSession) -> str:
     return "".join(blocks)
 
 
+def build_workout_overview(
+    workout_session: WorkoutSession, streak: int = 0
+) -> InputRichMessage:
+    total = workout_session.sets_total
+    exercise_count = len(workout_session.exercises)
+    streak_text = f" · 🔥 <b>{streak}</b>" if streak else ""
+    groups = ", ".join(
+        dict.fromkeys(item.muscle_group_name for item in workout_session.exercises)
+    )
+    return simple_rich(
+        workout_session.training_day.name,
+        f"<p><b>{exercise_count} упр. · {total} подходов</b>{streak_text}</p>"
+        f"<p>{escape(groups)}</p><p>Упражнения будут показаны по одному.</p>",
+        f'<tg-button-row><tg-button type="callback_data" style="success" data="workout:begin:{workout_session.id}">Начать тренировку</tg-button></tg-button-row>',
+    )
+
+
+def build_workout_exercise(
+    workout_session: WorkoutSession, position: int, streak: int = 0
+) -> InputRichMessage:
+    exercises = sorted(workout_session.exercises, key=lambda item: item.position)
+    item = next((exercise for exercise in exercises if exercise.position == position), None)
+    if item is None:
+        return build_workout_overview(workout_session, streak)
+    streak_text = f" · 🔥 <b>{streak}</b>" if streak else ""
+    complete_mark = " ✅" if item.is_completed else ""
+    buttons = []
+    for workout_set in sorted(item.sets, key=lambda set_item: set_item.position):
+        if workout_set.is_done:
+            buttons.append(
+                f'<tg-button type="disabled" style="success">✓ {workout_set.position}</tg-button>'
+            )
+        else:
+            buttons.append(
+                f'<tg-button type="callback_data" style="primary" data="workout:set:{workout_set.id}">{workout_set.position}</tg-button>'
+            )
+    action_buttons = (
+        f'<tg-button type="callback_data" data="exercise:details:{item.exercise_id}">Описание и медиа</tg-button>'
+    )
+    if item.training_day_exercise and item.training_day_exercise.alternatives:
+        action_buttons += (
+            f'<tg-button type="callback_data" style="primary" data="workout:replace:{item.id}">Заменить</tg-button>'
+        )
+    previous = (
+        f'<tg-button type="callback_data" data="workout:nav:{workout_session.id}:{position - 1}">←</tg-button>'
+        if position > 1
+        else '<tg-button type="disabled">←</tg-button>'
+    )
+    following = (
+        f'<tg-button type="callback_data" data="workout:nav:{workout_session.id}:{position + 1}">→</tg-button>'
+        if position < len(exercises)
+        else '<tg-button type="disabled">→</tg-button>'
+    )
+    blocks = [
+        f"<h3>{escape(workout_session.training_day.name)}</h3>",
+        f"<p><b>{position}/{len(exercises)} · {escape(item.muscle_group_name)}</b>{streak_text}</p>",
+        f"<p><b>{escape(item.exercise_name)}{complete_mark}</b><br>"
+        f"{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
+        f'<tg-button-row align="left">{action_buttons}</tg-button-row>',
+    ]
+    for offset in range(0, len(buttons), 6):
+        blocks.append(
+            f'<tg-button-row align="left">{"".join(buttons[offset : offset + 6])}</tg-button-row>'
+        )
+    blocks.append(
+        f'<tg-button-row align="center">{previous}<tg-button type="disabled">{position}/{len(exercises)}</tg-button>{following}</tg-button-row>'
+    )
+    return InputRichMessage(html="".join(blocks))
+
+
 def build_workout_dashboard(
     workout_session: WorkoutSession, streak: int = 0
 ) -> InputRichMessage:

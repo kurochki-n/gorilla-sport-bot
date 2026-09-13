@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from config_reader import get_settings
-from database.models import TrainingDay, TrainingDayGroup, User
+from database.models import Exercise, TrainingDay, TrainingDayExercise, TrainingDayGroup, User
 from database.repositories import (
     generate_workout_session,
     log_notification,
@@ -17,7 +17,7 @@ from database.repositories import (
 from database.session import SessionFactory
 from services.rich_messages import (
     build_motivation_message,
-    build_workout_dashboard,
+    build_workout_overview,
     send_rich,
 )
 from services.workouts import streaks
@@ -55,7 +55,10 @@ async def tick(bot: Bot) -> None:
                         .options(
                             selectinload(TrainingDay.muscle_groups).selectinload(
                                 TrainingDayGroup.muscle_group
-                            )
+                            ),
+                            selectinload(TrainingDay.exercises)
+                            .selectinload(TrainingDayExercise.exercise)
+                            .selectinload(Exercise.muscle_group),
                         )
                         .where(
                             TrainingDay.user_id == user.id,
@@ -82,7 +85,7 @@ async def tick(bot: Bot) -> None:
                 current_streak, _ = await streaks(session, user.id, today)
                 if workout.sent_at is None:
                     sent = await send_rich(
-                        bot, user.id, build_workout_dashboard(workout, current_streak)
+                        bot, user.id, build_workout_overview(workout, current_streak)
                     )
                     workout.telegram_message_id = sent.message_id
                     workout.sent_at = datetime.now(timezone.utc)
