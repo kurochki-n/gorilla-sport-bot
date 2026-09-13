@@ -39,7 +39,19 @@ async def init_db() -> None:
             await connection.execute(
                 text("ALTER TABLE exercises ADD COLUMN load_unit VARCHAR(8) DEFAULT 'кг'")
             )
+        await connection.execute(
+            text("CREATE TABLE IF NOT EXISTS app_migrations (name VARCHAR(64) PRIMARY KEY)")
+        )
+        reset_done = await connection.scalar(
+            text("SELECT 1 FROM app_migrations WHERE name = 'reset_load_values_v1'")
+        )
+        if reset_done is None:
+            await connection.execute(text("UPDATE exercises SET load_unit = NULL"))
+            await connection.execute(text("UPDATE workout_exercises SET load_unit = NULL"))
             await connection.execute(text("UPDATE workout_sets SET load_value = NULL, repetitions = NULL"))
+            await connection.execute(
+                text("INSERT INTO app_migrations (name) VALUES ('reset_load_values_v1')")
+            )
         workout_exercise_columns = await connection.run_sync(
             lambda sync_connection: {
                 column["name"]

@@ -297,6 +297,24 @@ class WorkoutSet(Base, TimestampMixin):
     workout_exercise: Mapped[WorkoutExercise] = relationship(back_populates="sets")
 
 
+class ExerciseSetPreset(Base, TimestampMixin):
+    __tablename__ = "exercise_set_presets"
+    __table_args__ = (
+        UniqueConstraint("user_id", "exercise_id", "position", name="uq_exercise_set_preset"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    exercise_id: Mapped[int] = mapped_column(
+        ForeignKey("exercises.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    load_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 class NotificationLog(Base, TimestampMixin):
     __tablename__ = "notification_logs"
     __table_args__ = (

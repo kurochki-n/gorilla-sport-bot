@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from database.models import (
     Exercise,
+    ExerciseSetPreset,
     MuscleGroup,
     NotificationLog,
     TrainingDay,
@@ -492,16 +493,11 @@ async def generate_workout_session(
         await session.flush()
         for set_position in range(1, exercise.default_sets + 1):
             previous_set = await session.scalar(
-                select(WorkoutSet)
-                .join(WorkoutExercise)
-                .join(WorkoutSession)
-                .where(
-                    WorkoutExercise.exercise_id == exercise.id,
-                    WorkoutSet.position == set_position,
-                    WorkoutSet.is_done.is_(True),
-                    WorkoutSession.user_id == training_day.user_id,
+                select(ExerciseSetPreset).where(
+                    ExerciseSetPreset.user_id == training_day.user_id,
+                    ExerciseSetPreset.exercise_id == exercise.id,
+                    ExerciseSetPreset.position == set_position,
                 )
-                .order_by(WorkoutSession.scheduled_date.desc(), WorkoutSet.id.desc())
             )
             session.add(
                 WorkoutSet(
@@ -683,6 +679,22 @@ async def mark_workout_set_done(
 
     workout_set.is_done = True
     workout_set.completed_at = datetime.now(timezone.utc)
+    preset = await session.scalar(
+        select(ExerciseSetPreset).where(
+            ExerciseSetPreset.user_id == user_id,
+            ExerciseSetPreset.exercise_id == workout_exercise.exercise_id,
+            ExerciseSetPreset.position == workout_set.position,
+        )
+    )
+    if preset is None:
+        preset = ExerciseSetPreset(
+            user_id=user_id,
+            exercise_id=workout_exercise.exercise_id,
+            position=workout_set.position,
+        )
+        session.add(preset)
+    preset.load_value = workout_set.load_value
+    preset.repetitions = workout_set.repetitions
     await session.flush()
 
     exercise_done_count = await session.scalar(
