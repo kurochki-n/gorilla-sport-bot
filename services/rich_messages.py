@@ -276,7 +276,8 @@ def build_training_days_message(training_days: list[TrainingDay]) -> InputRichMe
             f'<tr><td><b>{escape(training_day.name)}</b></td><td align="right">{training_day.reminder_time.strftime("%H:%M")}</td></tr>'
             f'<tr><td>{escape(mask_to_text(training_day.weekdays_mask))}</td><td align="right">{escape(group_text)}</td></tr>'
             "</table>"
-            f'<tg-button-row align="right"><tg-button type="callback_data" style="danger" data="day:delete:{training_day.id}">Удалить</tg-button></tg-button-row>'
+            f'<tg-button-row align="right"><tg-button type="callback_data" style="success" data="day:start:{training_day.id}">Начать</tg-button>'
+            f'<tg-button type="callback_data" style="danger" data="day:delete:{training_day.id}">Удалить</tg-button></tg-button-row>'
         )
     blocks.append(
         '<tg-button-row><tg-button type="callback_data" style="primary" data="day:new">+ Создать день</tg-button></tg-button-row>'

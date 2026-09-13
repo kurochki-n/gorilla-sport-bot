@@ -1391,6 +1391,39 @@ async def training_days_list_callback(
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("day:start:"))
+async def start_training_day(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    training_day_id = int(callback.data.rsplit(":", 1)[1])
+    training_day = await get_training_day(
+        session, callback.from_user.id, training_day_id
+    )
+    if training_day is None or not training_day.is_active:
+        await callback.answer("Тренировочный день недоступен", show_alert=True)
+        return
+
+    today = await local_today(session, callback.from_user.id)
+    workout = await generate_workout_session(session, training_day, today)
+    if workout is None:
+        await callback.answer("В тренировке нет доступных упражнений", show_alert=True)
+        return
+    if workout.sent_at is not None:
+        await callback.answer("Тренировка уже начата")
+        return
+
+    current_streak, _ = await streaks(session, callback.from_user.id, today)
+    sent = await send_rich(
+        callback.bot,
+        callback.from_user.id,
+        build_workout_dashboard(workout, current_streak),
+    )
+    workout.telegram_message_id = sent.message_id
+    workout.sent_at = datetime.now(timezone.utc)
+    await session.commit()
+    await callback.answer("Тренировка начата")
+
+
 @router.callback_query(F.data.startswith("day:delete:"))
 async def delete_training_day_prompt(
     callback: CallbackQuery, session: AsyncSession
