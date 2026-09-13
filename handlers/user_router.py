@@ -168,7 +168,7 @@ async def start(message: Message, session: AsyncSession, state: FSMContext) -> N
         simple_rich(
             "Тренировки",
             "<p>Собери собственную библиотеку упражнений, настрой тренировочные дни и выбери упражнения для каждого из них — бот будет присылать их по расписанию.</p>",
-            '<tg-button-row><tg-button type="callback_data" style="primary" data="day:list">Расписание</tg-button></tg-button-row>',
+            '<tg-button-row><tg-button type="callback_data" style="primary" data="start:schedule">Расписание</tg-button></tg-button-row>',
         ),
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -1376,6 +1376,17 @@ async def training_day_alternatives(
 async def training_days_list(message: Message, session: AsyncSession) -> None:
     training_days = await get_active_training_days(session, message.from_user.id)
     await send_screen(message, build_training_days_message(training_days))
+
+
+@router.callback_query(F.data == "start:schedule")
+async def start_schedule_callback(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    training_days = await get_active_training_days(session, callback.from_user.id)
+    await send_rich(
+        callback.bot, callback.from_user.id, build_training_days_message(training_days)
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "day:list")
