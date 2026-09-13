@@ -57,6 +57,7 @@ from services.rich_messages import (
     build_exercise_delete_confirmation,
     build_exercise_group_picker,
     build_exercises_message,
+    build_exercises_messages,
     build_group_exercises_picker,
     build_group_delete_confirmation,
     build_groups_message,
@@ -675,7 +676,10 @@ async def exercise_media_skip(
 @router.message(Command("exercises"))
 async def exercises_list(message: Message, session: AsyncSession) -> None:
     exercises = await get_active_exercises(session, message.from_user.id)
-    await send_screen(message, build_exercises_message(exercises))
+    screens = build_exercises_messages(exercises)
+    await send_screen(message, screens[0])
+    for screen in screens[1:]:
+        await send_rich(message.bot, message.chat.id, screen)
 
 
 @router.callback_query(F.data == "exercise:list")
@@ -683,13 +687,16 @@ async def exercises_list_callback(
     callback: CallbackQuery, session: AsyncSession
 ) -> None:
     exercises = await get_active_exercises(session, callback.from_user.id)
+    screens = build_exercises_messages(exercises)
     if callback.message:
         await edit_rich(
             callback.bot,
             callback.message.chat.id,
             callback.message.message_id,
-            build_exercises_message(exercises),
+            screens[0],
         )
+        for screen in screens[1:]:
+            await send_rich(callback.bot, callback.from_user.id, screen)
     await callback.answer()
 
 

@@ -147,6 +147,15 @@ def build_exercises_message(exercises: list[Exercise]) -> InputRichMessage:
     return InputRichMessage(html="".join(blocks))
 
 
+def build_exercises_messages(exercises: list[Exercise], page_size: int = 4) -> list[InputRichMessage]:
+    if not exercises:
+        return [build_exercises_message(exercises)]
+    return [
+        build_exercises_message(exercises[index : index + page_size])
+        for index in range(0, len(exercises), page_size)
+    ]
+
+
 def build_exercise_delete_confirmation(exercise: Exercise) -> InputRichMessage:
     return simple_rich(
         "Удалить упражнение?",
