@@ -385,28 +385,25 @@ def build_workout_exercise(
         return build_workout_overview(workout_session, streak)
     streak_text = f" · 🔥 <b>{streak}</b>" if streak else ""
     complete_mark = " ✅" if item.is_completed else ""
-    buttons = []
-    set_rows = ["<table compact><tr><th>Подход</th><th>Нагрузка</th><th>Повторения</th></tr>"]
+    ordered_sets = sorted(item.sets, key=lambda set_item: set_item.position)
+    workout_set = next((set_item for set_item in ordered_sets if not set_item.is_done), ordered_sets[-1])
     unit = "сек" if "сек" in item.target_text.lower() else "км" if "км" in item.target_text.lower() else "кг"
-    for workout_set in sorted(item.sets, key=lambda set_item: set_item.position):
-        load = "—" if workout_set.load_value is None else f"{workout_set.load_value:g} {unit}"
-        reps = "—" if workout_set.repetitions is None else str(workout_set.repetitions)
-        set_rows.append(f"<tr><td>{workout_set.position}</td><td>{load}</td><td>{reps}</td></tr>")
-        if workout_set.is_done:
-            buttons.append(
-                f'<tg-button type="disabled" style="success">✓ {workout_set.position}</tg-button>'
-            )
-        else:
-            buttons.append(
-                f'<tg-button type="callback_data" style="primary" data="workout:set:{workout_set.id}">{workout_set.position}</tg-button>'
-            )
-            buttons.extend([
-                f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:-">Нагрузка −</tg-button>',
-                f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:+">Нагрузка +</tg-button>',
-                f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:-">Повторения −</tg-button>',
-                f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:+">Повторения +</tg-button>',
-            ])
-    set_rows.append("</table>")
+    load = "—" if workout_set.load_value is None else f"{workout_set.load_value:g} {unit}"
+    reps = "—" if workout_set.repetitions is None else str(workout_set.repetitions)
+    set_rows = [
+        "<table compact><tr><th>Подход</th><th>Нагрузка</th><th>Повторения</th></tr>",
+        f"<tr><td>{workout_set.position}/{len(ordered_sets)}</td><td>{load}</td><td>{reps}</td></tr>",
+        "</table>",
+    ]
+    buttons = []
+    if not workout_set.is_done:
+        buttons = [
+            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:-">Нагрузка −</tg-button>',
+            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:+">Нагрузка +</tg-button>',
+            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:-">Повторения −</tg-button>',
+            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:+">Повторения +</tg-button>',
+            f'<tg-button type="callback_data" style="success" data="workout:set:{workout_set.id}">Завершить подход</tg-button>',
+        ]
     action_buttons = ""
     if (
         item.sets_done == 0
@@ -433,8 +430,8 @@ def build_workout_exercise(
         f"<h3>{escape(workout_session.training_day.name)}</h3>",
         f"<p><b>{position}/{len(exercises)} · {escape(item.muscle_group_name)}</b>{streak_text}</p>",
         f"<p><b>{escape(item.exercise_name)}{complete_mark}</b></p>",
-        "".join(set_rows),
         f'<tg-button-row align="left">{action_buttons}</tg-button-row>',
+        "".join(set_rows),
         f"<p>{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
     ]
     for offset in range(0, len(buttons), 6):
