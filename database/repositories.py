@@ -382,9 +382,14 @@ async def generate_workout_session(
             .where(TrainingDayExercise.training_day_id == training_day.id)
         )
     )
+    group_limit_rows = await session.execute(
+        select(TrainingDayGroup.muscle_group_id, TrainingDayGroup.exercise_count).where(
+            TrainingDayGroup.training_day_id == training_day.id
+        )
+    )
     group_limits = {
-        group_link.muscle_group_id: group_link.exercise_count
-        for group_link in training_day.muscle_groups
+        muscle_group_id: exercise_count
+        for muscle_group_id, exercise_count in group_limit_rows.all()
     }
     selected_by_group: dict[int, int] = {}
     selected_links: list[TrainingDayExercise] = []
