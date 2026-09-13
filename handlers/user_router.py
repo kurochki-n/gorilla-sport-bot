@@ -483,40 +483,39 @@ async def exercise_target(message: Message, state: FSMContext) -> None:
         )
         return
     await state.update_data(target_text=target)
-    await state.set_state(CreateExercise.rest)
+    await state.set_state(CreateExercise.load_unit)
     await send_screen(
         message,
         simple_rich(
-            "Новое упражнение · 5/7",
-            "<p>Сколько отдыхать между подходами?</p>",
-            '<tg-button-row align="left">'
-            '<tg-button type="callback_data" data="exercise:rest:60">60 сек</tg-button>'
-            '<tg-button type="callback_data" style="primary" data="exercise:rest:90">90 сек</tg-button>'
-            '<tg-button type="callback_data" data="exercise:rest:120">120 сек</tg-button>'
-            '<tg-button type="callback_data" data="exercise:rest:180">180 сек</tg-button>'
-            "</tg-button-row>",
+            "Тип нагрузки",
+            "<p>Выбери единицу нагрузки. Значения нагрузки и повторений задаются во время тренировки.</p>",
+            '<tg-button-row><tg-button type="callback_data" data="exercise:load_unit:кг">кг</tg-button>'
+            '<tg-button type="callback_data" data="exercise:load_unit:км">км</tg-button>'
+            '<tg-button type="callback_data" data="exercise:load_unit:сек">сек</tg-button></tg-button-row>',
         ),
     )
 
 
-@router.callback_query(CreateExercise.rest, F.data.startswith("exercise:rest:"))
-async def exercise_rest(callback: CallbackQuery, state: FSMContext) -> None:
-    rest_seconds = int(callback.data.rsplit(":", 1)[1])
-    if rest_seconds not in {60, 90, 120, 180}:
-        await callback.answer("Недопустимое время отдыха", show_alert=True)
+@router.callback_query(CreateExercise.load_unit, F.data.startswith("exercise:load_unit:"))
+async def exercise_load_unit(callback: CallbackQuery, state: FSMContext) -> None:
+    load_unit = callback.data.rsplit(":", 1)[1]
+    if load_unit not in {"кг", "км", "сек"}:
+        await callback.answer("Недопустимый тип нагрузки", show_alert=True)
         return
-    await state.update_data(rest_seconds=rest_seconds)
-    await state.set_state(CreateExercise.description)
+    await state.update_data(load_unit=load_unit)
+    await state.set_state(CreateExercise.rest)
     if callback.message:
         await edit_rich(
-            callback.bot,
-            callback.message.chat.id,
-            callback.message.message_id,
+            callback.bot, callback.message.chat.id, callback.message.message_id,
             simple_rich(
-                "Новое упражнение · 6/7",
-                "<p>Отправь описание техники, подсказки или важные замечания.</p>"
-                "<p><i>До 800 символов. Этот шаг можно пропустить.</i></p>",
-                '<tg-button-row><tg-button type="callback_data" data="exercise:description:skip">Пропустить</tg-button></tg-button-row>',
+                "Новое упражнение · 5/8",
+                "<p>Сколько отдыхать между подходами?</p>",
+                '<tg-button-row align="left">'
+                '<tg-button type="callback_data" data="exercise:rest:60">60 сек</tg-button>'
+                '<tg-button type="callback_data" style="primary" data="exercise:rest:90">90 сек</tg-button>'
+                '<tg-button type="callback_data" data="exercise:rest:120">120 сек</tg-button>'
+                '<tg-button type="callback_data" data="exercise:rest:180">180 сек</tg-button>'
+                "</tg-button-row>",
             ),
         )
     await callback.answer()
@@ -595,6 +594,7 @@ async def finish_exercise_creation(
         data.get("description"),
         media_file_id,
         media_type,
+        data.get("load_unit", "кг"),
     )
     await state.clear()
     media_status = "медиа добавлено" if media_file_id else "без медиа"
@@ -781,11 +781,26 @@ async def exercise_edit_menu(callback: CallbackQuery, session: AsyncSession) -> 
                 f'<tg-button type="callback_data" data="exercise:field:{exercise.id}:default_sets">Подходы</tg-button></tg-button-row>'
                 f'<tg-button-row><tg-button type="callback_data" data="exercise:field:{exercise.id}:target_text">Цель</tg-button>'
                 f'<tg-button type="callback_data" data="exercise:field:{exercise.id}:rest_seconds">Отдых</tg-button></tg-button-row>'
+                f'<tg-button-row><tg-button type="callback_data" data="exercise:unit:{exercise.id}:кг">кг</tg-button>'
+                f'<tg-button type="callback_data" data="exercise:unit:{exercise.id}:км">км</tg-button>'
+                f'<tg-button type="callback_data" data="exercise:unit:{exercise.id}:сек">сек</tg-button></tg-button-row>'
                 f'<tg-button-row><tg-button type="callback_data" data="exercise:content:{exercise.id}">Описание и медиа</tg-button></tg-button-row>'
                 '<tg-button-row><tg-button type="callback_data" data="exercise:list">Назад</tg-button></tg-button-row>',
             ),
         )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("exercise:unit:"))
+async def exercise_edit_unit(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, exercise_id, load_unit = callback.data.split(":")
+    exercise = await update_exercise_field(
+        session, callback.from_user.id, int(exercise_id), "load_unit", load_unit
+    )
+    if exercise is None:
+        await callback.answer("Упражнение недоступно", show_alert=True)
+        return
+    await callback.answer("Тип нагрузки сохранён")
 
 
 @router.callback_query(F.data.startswith("exercise:field:"))

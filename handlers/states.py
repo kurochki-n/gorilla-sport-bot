@@ -10,6 +10,7 @@ class CreateExercise(StatesGroup):
     name = State()
     sets = State()
     target = State()
+    load_unit = State()
     rest = State()
     description = State()
     media = State()

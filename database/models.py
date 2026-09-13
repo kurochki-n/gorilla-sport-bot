@@ -75,6 +75,7 @@ class Exercise(Base, TimestampMixin):
     default_sets: Mapped[int] = mapped_column(Integer, default=3)
     target_text: Mapped[str] = mapped_column(String(100), default="8–12 повторений")
     rest_seconds: Mapped[int] = mapped_column(Integer, default=90)
+    load_unit: Mapped[str] = mapped_column(String(8), default="кг")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
     user: Mapped[User] = relationship(back_populates="exercises")
@@ -256,6 +257,7 @@ class WorkoutExercise(Base, TimestampMixin):
     sets_done: Mapped[int] = mapped_column(Integer, default=0)
     target_text: Mapped[str] = mapped_column(String(100))
     rest_seconds: Mapped[int] = mapped_column(Integer, default=90)
+    load_unit: Mapped[str] = mapped_column(String(8), default="кг")
     position: Mapped[int] = mapped_column(Integer)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -107,6 +107,7 @@ async def create_exercise(
     description: str | None = None,
     media_file_id: str | None = None,
     media_type: str | None = None,
+    load_unit: str = "кг",
 ) -> Exercise:
     exercise = Exercise(
         user_id=user_id,
@@ -118,6 +119,7 @@ async def create_exercise(
         default_sets=default_sets,
         target_text=target_text,
         rest_seconds=rest_seconds,
+        load_unit=load_unit,
     )
     session.add(exercise)
     await session.commit()
@@ -131,7 +133,7 @@ async def update_exercise_field(
     exercise = await get_exercise(session, user_id, exercise_id)
     if exercise is None or not exercise.is_active:
         return None
-    if field not in {"name", "default_sets", "target_text", "rest_seconds"}:
+    if field not in {"name", "default_sets", "target_text", "rest_seconds", "load_unit"}:
         return None
     setattr(exercise, field, value)
     await session.commit()
@@ -483,6 +485,7 @@ async def generate_workout_session(
             sets_total=exercise.default_sets,
             target_text=exercise.target_text,
             rest_seconds=exercise.rest_seconds,
+            load_unit=exercise.load_unit,
             position=position,
         )
         session.add(workout_exercise)
@@ -495,6 +498,7 @@ async def generate_workout_session(
                 .where(
                     WorkoutExercise.exercise_id == exercise.id,
                     WorkoutSet.position == set_position,
+                    WorkoutSet.is_done.is_(True),
                     WorkoutSession.user_id == training_day.user_id,
                 )
                 .order_by(WorkoutSession.scheduled_date.desc(), WorkoutSet.id.desc())
@@ -572,6 +576,7 @@ async def switch_workout_exercise(
     workout_exercise.sets_total = replacement.default_sets
     workout_exercise.target_text = replacement.target_text
     workout_exercise.rest_seconds = replacement.rest_seconds
+    workout_exercise.load_unit = replacement.load_unit
     workout_exercise.sets_done = 0
     workout_exercise.completed_at = None
     workout_exercise.session.completed_at = None

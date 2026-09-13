@@ -387,7 +387,7 @@ def build_workout_exercise(
     complete_mark = " ✅" if item.is_completed else ""
     ordered_sets = sorted(item.sets, key=lambda set_item: set_item.position)
     workout_set = next((set_item for set_item in ordered_sets if not set_item.is_done), ordered_sets[-1])
-    unit = "сек" if "сек" in item.target_text.lower() else "км" if "км" in item.target_text.lower() else "кг"
+    unit = item.load_unit
     load = "—" if workout_set.load_value is None else f"{workout_set.load_value:g} {unit}"
     reps = "—" if workout_set.repetitions is None else str(workout_set.repetitions)
     set_rows = [
