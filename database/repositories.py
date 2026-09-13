@@ -378,10 +378,19 @@ async def generate_workout_session(
     if existing is not None:
         return existing
 
+    alternative_ids = set(
+        await session.scalars(
+            select(TrainingDayExerciseAlternative.exercise_id)
+            .join(TrainingDayExercise)
+            .where(TrainingDayExercise.training_day_id == training_day.id)
+        )
+    )
     selected_exercises = [
         link.exercise
         for link in training_day.exercises
-        if link.exercise.is_active and link.exercise.muscle_group.is_active
+        if link.exercise.id not in alternative_ids
+        and link.exercise.is_active
+        and link.exercise.muscle_group.is_active
     ]
     if not selected_exercises:
         return None

@@ -8,7 +8,13 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.methods import SendRichMessage
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardRemove,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config_reader import get_settings
@@ -699,24 +705,42 @@ async def exercise_details(callback: CallbackQuery, session: AsyncSession) -> No
         f"{exercise.default_sets} × {escape(exercise.target_text)} · "
         f"отдых {exercise.rest_seconds} сек"
     )
+    hide_button = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Скрыть", callback_data="exercise:hide")]
+        ]
+    )
     if exercise.media_type == "photo" and exercise.media_file_id:
         await callback.bot.send_photo(
-            callback.from_user.id, exercise.media_file_id, caption=caption
+            callback.from_user.id, exercise.media_file_id, caption=caption,
+            reply_markup=hide_button,
         )
     elif exercise.media_type == "video" and exercise.media_file_id:
         await callback.bot.send_video(
-            callback.from_user.id, exercise.media_file_id, caption=caption
+            callback.from_user.id, exercise.media_file_id, caption=caption,
+            reply_markup=hide_button,
         )
     elif exercise.media_type == "animation" and exercise.media_file_id:
         await callback.bot.send_animation(
-            callback.from_user.id, exercise.media_file_id, caption=caption
+            callback.from_user.id, exercise.media_file_id, caption=caption,
+            reply_markup=hide_button,
         )
     elif exercise.media_type == "document" and exercise.media_file_id:
         await callback.bot.send_document(
-            callback.from_user.id, exercise.media_file_id, caption=caption
+            callback.from_user.id, exercise.media_file_id, caption=caption,
+            reply_markup=hide_button,
         )
     else:
-        await callback.bot.send_message(callback.from_user.id, caption)
+        await callback.bot.send_message(
+            callback.from_user.id, caption, reply_markup=hide_button
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "exercise:hide")
+async def hide_exercise_details(callback: CallbackQuery) -> None:
+    if callback.message:
+        await callback.message.delete()
     await callback.answer()
 
 
