@@ -1421,10 +1421,6 @@ async def start_training_day(
     if workout is None:
         await callback.answer("В тренировке нет доступных упражнений", show_alert=True)
         return
-    if workout.sent_at is not None:
-        await callback.answer("Тренировка уже начата")
-        return
-
     current_streak, _ = await streaks(session, callback.from_user.id, today)
     sent = await send_rich(
         callback.bot,
