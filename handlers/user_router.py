@@ -1273,10 +1273,12 @@ async def training_day_alternative_bases(
         await state.update_data(alternative_base_ids=picked, alternative_base_index=0)
         await state.set_state(CreateTrainingDay.alternatives)
         base = await get_exercise(session, callback.from_user.id, picked[0])
-        choices = await get_active_exercises(session, callback.from_user.id)
         if base is None:
             await callback.answer("Упражнение недоступно", show_alert=True)
             return
+        choices = await get_active_exercises(
+            session, callback.from_user.id, base.muscle_group_id
+        )
         if callback.message:
             await edit_rich(
                 callback.bot, callback.message.chat.id, callback.message.message_id,
@@ -1314,10 +1316,12 @@ async def training_day_alternatives(
     base_ids = [int(value) for value in data["alternative_base_ids"]]
     index = int(data.get("alternative_base_index", 0))
     base = await get_exercise(session, callback.from_user.id, base_ids[index])
-    choices = await get_active_exercises(session, callback.from_user.id)
     if base is None:
         await callback.answer("Упражнение недоступно", show_alert=True)
         return
+    choices = await get_active_exercises(
+        session, callback.from_user.id, base.muscle_group_id
+    )
     alternatives = dict(data.get("alternatives", {}))
     picked = list(alternatives.get(str(base.id), []))
     choice_ids = {exercise.id for exercise in choices if exercise.id != base.id}
@@ -1353,10 +1357,15 @@ async def training_day_alternatives(
     if next_base is None:
         await callback.answer("Упражнение недоступно", show_alert=True)
         return
+    next_choices = await get_active_exercises(
+        session, callback.from_user.id, next_base.muscle_group_id
+    )
     if callback.message:
         await edit_rich(
             callback.bot, callback.message.chat.id, callback.message.message_id,
-            build_alternatives_picker(next_base, choices, set(), index + 1, len(base_ids)),
+            build_alternatives_picker(
+                next_base, next_choices, set(), index + 1, len(base_ids)
+            ),
         )
     await callback.answer()
 
