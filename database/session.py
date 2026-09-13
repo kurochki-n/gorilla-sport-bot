@@ -83,6 +83,21 @@ async def init_db() -> None:
                 )
             )
 
+        workout_set_columns = await connection.run_sync(
+            lambda sync_connection: {
+                column["name"]
+                for column in inspect(sync_connection).get_columns("workout_sets")
+            }
+        )
+        for column_name, column_type in {
+            "load_value": "FLOAT",
+            "repetitions": "INTEGER",
+        }.items():
+            if column_name not in workout_set_columns:
+                await connection.execute(
+                    text(f"ALTER TABLE workout_sets ADD COLUMN {column_name} {column_type}")
+                )
+
 
 async def close_db() -> None:
     await engine.dispose()

@@ -15,6 +15,10 @@ class CreateExercise(StatesGroup):
     media = State()
 
 
+class EditExerciseValue(StatesGroup):
+    value = State()
+
+
 class EditExerciseContent(StatesGroup):
     description = State()
     media = State()

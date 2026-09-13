@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import re
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -121,6 +122,19 @@ async def create_exercise(
     session.add(exercise)
     await session.commit()
     await session.refresh(exercise)
+    return exercise
+
+
+async def update_exercise_field(
+    session: AsyncSession, user_id: int, exercise_id: int, field: str, value
+) -> Exercise | None:
+    exercise = await get_exercise(session, user_id, exercise_id)
+    if exercise is None or not exercise.is_active:
+        return None
+    if field not in {"name", "default_sets", "target_text", "rest_seconds"}:
+        return None
+    setattr(exercise, field, value)
+    await session.commit()
     return exercise
 
 
@@ -364,6 +378,11 @@ async def get_session_for_training_day(
     )
 
 
+def _default_repetitions(target_text: str) -> int | None:
+    match = re.search(r"\d+", target_text)
+    return int(match.group()) if match else None
+
+
 async def generate_workout_session(
     session: AsyncSession,
     training_day: TrainingDay,
@@ -469,8 +488,28 @@ async def generate_workout_session(
         session.add(workout_exercise)
         await session.flush()
         for set_position in range(1, exercise.default_sets + 1):
+            previous_set = await session.scalar(
+                select(WorkoutSet)
+                .join(WorkoutExercise)
+                .join(WorkoutSession)
+                .where(
+                    WorkoutExercise.exercise_id == exercise.id,
+                    WorkoutSet.position == set_position,
+                    WorkoutSession.user_id == training_day.user_id,
+                )
+                .order_by(WorkoutSession.scheduled_date.desc(), WorkoutSet.id.desc())
+            )
             session.add(
-                WorkoutSet(workout_exercise_id=workout_exercise.id, position=set_position)
+                WorkoutSet(
+                    workout_exercise_id=workout_exercise.id,
+                    position=set_position,
+                    load_value=previous_set.load_value if previous_set else None,
+                    repetitions=(
+                        previous_set.repetitions
+                        if previous_set and previous_set.repetitions is not None
+                        else _default_repetitions(exercise.target_text)
+                    ),
+                )
             )
 
     await session.commit()
@@ -561,6 +600,26 @@ async def get_sessions_for_day(
         .order_by(WorkoutSession.id)
     )
     return list(result.unique())
+
+
+async def adjust_workout_set_value(
+    session: AsyncSession, user_id: int, set_id: int, field: str, delta: int
+) -> WorkoutSession | None:
+    workout_set = await session.scalar(
+        select(WorkoutSet)
+        .options(selectinload(WorkoutSet.workout_exercise).selectinload(WorkoutExercise.session))
+        .join(WorkoutExercise).join(WorkoutSession)
+        .where(WorkoutSet.id == set_id, WorkoutSession.user_id == user_id)
+    )
+    if workout_set is None or workout_set.is_done or field not in {"load", "reps"}:
+        return None
+    if field == "load":
+        workout_set.load_value = max(0, (workout_set.load_value or 0) + delta * 2.5)
+    else:
+        workout_set.repetitions = max(0, (workout_set.repetitions or 0) + delta)
+    session_id = workout_set.workout_exercise.session_id
+    await session.commit()
+    return await get_workout_session(session, user_id, session_id)
 
 
 async def mark_workout_set_done(

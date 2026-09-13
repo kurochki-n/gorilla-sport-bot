@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Float,
     Integer,
     String,
     Text,
@@ -284,6 +285,8 @@ class WorkoutSet(Base, TimestampMixin):
         ForeignKey("workout_exercises.id", ondelete="CASCADE"), index=True
     )
     position: Mapped[int] = mapped_column(Integer)
+    load_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_done: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

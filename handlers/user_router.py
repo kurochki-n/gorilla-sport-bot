@@ -22,6 +22,7 @@ from database.models import User
 from database.repositories import (
     create_exercise,
     create_muscle_group,
+    adjust_workout_set_value,
     create_training_day,
     deactivate_exercise,
     deactivate_muscle_group,
@@ -39,6 +40,7 @@ from database.repositories import (
     restart_workout_session,
     switch_workout_exercise,
     update_exercise_content,
+    update_exercise_field,
     upsert_user,
 )
 from handlers.states import (
@@ -46,6 +48,7 @@ from handlers.states import (
     CreateMuscleGroup,
     CreateTrainingDay,
     EditExerciseContent,
+    EditExerciseValue,
 )
 from services.rich_messages import (
     build_alternative_bases_picker,
@@ -752,6 +755,77 @@ def edit_exercise_media_prompt():
         '<tg-button-row><tg-button type="callback_data" data="exercise:edit_media:keep">Оставить текущее</tg-button>'
         '<tg-button type="callback_data" data="exercise:edit_media:clear">Без медиа</tg-button></tg-button-row>',
     )
+
+
+@router.callback_query(F.data.startswith("exercise:edit:"))
+async def exercise_edit_menu(callback: CallbackQuery, session: AsyncSession) -> None:
+    exercise_id = int(callback.data.rsplit(":", 1)[1])
+    exercise = await get_exercise(session, callback.from_user.id, exercise_id)
+    if exercise is None or not exercise.is_active:
+        await callback.answer("Упражнение недоступно", show_alert=True)
+        return
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            simple_rich(
+                f"Изменить · {exercise.name}",
+                "<p>Выбери параметр для изменения.</p>",
+                f'<tg-button-row><tg-button type="callback_data" data="exercise:field:{exercise.id}:name">Название</tg-button>'
+                f'<tg-button type="callback_data" data="exercise:field:{exercise.id}:default_sets">Подходы</tg-button></tg-button-row>'
+                f'<tg-button-row><tg-button type="callback_data" data="exercise:field:{exercise.id}:target_text">Цель</tg-button>'
+                f'<tg-button type="callback_data" data="exercise:field:{exercise.id}:rest_seconds">Отдых</tg-button></tg-button-row>'
+                f'<tg-button-row><tg-button type="callback_data" data="exercise:content:{exercise.id}">Описание и медиа</tg-button></tg-button-row>'
+                '<tg-button-row><tg-button type="callback_data" data="exercise:list">Назад</tg-button></tg-button-row>',
+            ),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("exercise:field:"))
+async def exercise_edit_field(callback: CallbackQuery, state: FSMContext) -> None:
+    _, _, exercise_id, field = callback.data.split(":")
+    labels = {"name": "название", "default_sets": "число подходов", "target_text": "цель", "rest_seconds": "отдых в секундах"}
+    await state.clear()
+    await state.update_data(exercise_id=int(exercise_id), field=field)
+    await state.set_state(EditExerciseValue.value)
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            simple_rich("Изменить упражнение", f"<p>Отправь новое значение: <b>{labels[field]}</b>.</p>"),
+        )
+    await callback.answer()
+
+
+@router.message(EditExerciseValue.value)
+async def exercise_edit_value(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    data = await state.get_data()
+    field = data["field"]
+    raw = (message.text or "").strip()
+    if field == "name":
+        value = raw
+        valid = 1 <= len(value) <= 100
+    elif field == "target_text":
+        value = raw
+        valid = 1 <= len(value) <= 100
+    else:
+        try:
+            value = int(raw)
+            valid = 1 <= value <= (6 if field == "default_sets" else 1800)
+        except ValueError:
+            valid = False
+            value = None
+    if not valid:
+        await send_screen(message, simple_rich("Не подходит", "<p>Проверь введённое значение.</p>"))
+        return
+    exercise = await update_exercise_field(
+        session, message.from_user.id, int(data["exercise_id"]), field, value
+    )
+    await state.clear()
+    if exercise is None:
+        await send_screen(message, simple_rich("Упражнение недоступно", "<p>Открой список заново.</p>"))
+        return
+    exercises = await get_active_exercises(session, message.from_user.id)
+    await send_screen(message, build_exercises_message(exercises))
 
 
 @router.callback_query(F.data.startswith("exercise:content:"))
@@ -1648,6 +1722,22 @@ async def replace_workout_exercise(
             build_workout_exercise(workout, position, current_streak),
         )
     await callback.answer("Упражнение заменено")
+
+
+@router.callback_query(F.data.startswith("workout:value:"))
+async def adjust_workout_value(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, set_id, field, sign = callback.data.split(":")
+    workout = await adjust_workout_set_value(
+        session, callback.from_user.id, int(set_id), field, 1 if sign == "+" else -1
+    )
+    if workout is None:
+        await callback.answer("Подход уже закрыт", show_alert=True)
+        return
+    current_streak, _ = await streaks(session, callback.from_user.id, workout.scheduled_date)
+    exercise = next(item for item in workout.exercises if any(str(item_set.id) == set_id for item_set in item.sets))
+    if callback.message:
+        await edit_rich(callback.bot, callback.message.chat.id, callback.message.message_id, build_workout_exercise(workout, exercise.position, current_streak))
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("workout:set:"))
