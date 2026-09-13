@@ -384,7 +384,7 @@ def build_workout_exercise(
         and item.training_day_exercise.alternatives
     ):
         replace_button = (
-            f'<tg-button-row align="right"><tg-button type="callback_data" style="primary" data="workout:replace:{item.id}">Заменить</tg-button></tg-button-row>'
+            f'<tg-button-row align="left"><tg-button type="callback_data" style="primary" data="workout:replace:{item.id}">Заменить</tg-button></tg-button-row>'
         )
     previous = (
         f'<tg-button type="callback_data" data="workout:nav:{workout_session.id}:{position - 1}">←</tg-button>'
@@ -399,9 +399,9 @@ def build_workout_exercise(
     blocks = [
         f"<h3>{escape(workout_session.training_day.name)}</h3>",
         f"<p><b>{position}/{len(exercises)} · {escape(item.muscle_group_name)}</b>{streak_text}</p>",
-        f"<p><b>{escape(item.exercise_name)}{complete_mark}</b><br>"
-        f"{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
+        f"<p><b>{escape(item.exercise_name)}{complete_mark}</b></p>",
         replace_button,
+        f"<p>{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
         f'<tg-button-row align="left">{details_button}</tg-button-row>',
     ]
     for offset in range(0, len(buttons), 6):
