@@ -1563,6 +1563,18 @@ async def today_callback(callback: CallbackQuery, session: AsyncSession) -> None
 async def begin_workout(callback: CallbackQuery, session: AsyncSession) -> None:
     workout_id = int(callback.data.rsplit(":", 1)[1])
     workout = await get_workout_session(session, callback.from_user.id, workout_id)
+    if workout is None:
+        await callback.answer("Тренировка недоступна", show_alert=True)
+        return
+    training_day = await get_training_day(
+        session, callback.from_user.id, workout.training_day_id
+    )
+    if training_day is None:
+        await callback.answer("Тренировка недоступна", show_alert=True)
+        return
+    workout = await generate_workout_session(
+        session, training_day, workout.scheduled_date
+    )
     if workout is None or not workout.exercises:
         await callback.answer("Тренировка недоступна", show_alert=True)
         return

@@ -382,20 +382,61 @@ async def generate_workout_session(
             .where(TrainingDayExercise.training_day_id == training_day.id)
         )
     )
-    selected_exercises = [
-        link.exercise
-        for link in training_day.exercises
-        if link.exercise.id not in alternative_ids
-        and link.exercise.is_active
-        and link.exercise.muscle_group.is_active
-    ]
+    group_limits = {
+        group_link.muscle_group_id: group_link.exercise_count
+        for group_link in training_day.muscle_groups
+    }
+    selected_by_group: dict[int, int] = {}
+    selected_links: list[TrainingDayExercise] = []
+    for link in training_day.exercises:
+        exercise = link.exercise
+        group_id = exercise.muscle_group_id
+        if (
+            exercise.id in alternative_ids
+            or not exercise.is_active
+            or not exercise.muscle_group.is_active
+            or group_id not in group_limits
+            or selected_by_group.get(group_id, 0) >= group_limits[group_id]
+        ):
+            continue
+        selected_links.append(link)
+        selected_by_group[group_id] = selected_by_group.get(group_id, 0) + 1
+    selected_exercises = [link.exercise for link in selected_links]
     if not selected_exercises:
         return None
     if existing is not None:
-        if existing.sets_done > 0 or len(existing.exercises) == len(selected_exercises):
+        selected_link_ids = {link.id for link in selected_links}
+        selected_exercise_ids = {exercise.id for exercise in selected_exercises}
+        extras = [
+            item
+            for item in existing.exercises
+            if (
+                item.training_day_exercise_id not in selected_link_ids
+                if item.training_day_exercise_id is not None
+                else item.exercise_id not in selected_exercise_ids
+            )
+        ]
+        if extras:
+            for item in extras:
+                await session.delete(item)
+            await session.flush()
+            for position, item in enumerate(
+                (item for item in existing.exercises if item not in extras), start=1
+            ):
+                item.position = position
+            existing_id = existing.id
+            await session.commit()
+            session.expire_all()
+            existing = await get_workout_session(
+                session, training_day.user_id, existing_id
+            )
+        if existing is not None and (
+            existing.sets_done > 0 or len(existing.exercises) == len(selected_exercises)
+        ):
             return existing
-        await session.delete(existing)
-        await session.flush()
+        if existing is not None:
+            await session.delete(existing)
+            await session.flush()
 
     workout = WorkoutSession(
         user_id=training_day.user_id,
