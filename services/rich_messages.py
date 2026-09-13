@@ -395,14 +395,14 @@ def build_workout_exercise(
         f"<tr><td>{workout_set.position}/{len(ordered_sets)}</td><td>{load}</td><td>{reps}</td></tr>",
         "</table>",
     ]
-    buttons = []
+    control_rows: list[str] = []
     if not workout_set.is_done:
-        buttons = [
-            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:-">Нагрузка −</tg-button>',
-            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:+">Нагрузка +</tg-button>',
-            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:-">Повторения −</tg-button>',
-            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:+">Повторения +</tg-button>',
-            f'<tg-button type="callback_data" style="success" data="workout:set:{workout_set.id}">Завершить подход</tg-button>',
+        control_rows = [
+            f'<tg-button-row align="left"><tg-button type="callback_data" data="workout:value:{workout_set.id}:load:-">Нагрузка −</tg-button>'
+            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:+">Нагрузка +</tg-button></tg-button-row>',
+            f'<tg-button-row align="left"><tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:-">Повторения −</tg-button>'
+            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:+">Повторения +</tg-button></tg-button-row>',
+            f'<tg-button-row><tg-button type="callback_data" style="success" data="workout:set:{workout_set.id}">Завершить подход</tg-button></tg-button-row>',
         ]
     action_buttons = ""
     if (
@@ -430,14 +430,11 @@ def build_workout_exercise(
         f"<h3>{escape(workout_session.training_day.name)}</h3>",
         f"<p><b>{position}/{len(exercises)} · {escape(item.muscle_group_name)}</b>{streak_text}</p>",
         f"<p><b>{escape(item.exercise_name)}{complete_mark}</b></p>",
+        f"<p>{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
         f'<tg-button-row align="left">{action_buttons}</tg-button-row>',
         "".join(set_rows),
-        f"<p>{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
     ]
-    for offset in range(0, len(buttons), 6):
-        blocks.append(
-            f'<tg-button-row align="left">{"".join(buttons[offset : offset + 6])}</tg-button-row>'
-        )
+    blocks.extend(control_rows)
     blocks.append(
         f'<tg-button-row align="center">{previous}<tg-button type="disabled">{position}/{len(exercises)}</tg-button>{following}</tg-button-row>'
     )
