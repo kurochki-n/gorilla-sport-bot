@@ -1454,7 +1454,7 @@ async def start_training_day(
     workout.telegram_message_id = sent.message_id
     workout.sent_at = datetime.now(timezone.utc)
     await session.commit()
-    await callback.answer("Тренировка начата")
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("day:delete:"))
