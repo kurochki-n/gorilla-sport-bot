@@ -29,6 +29,7 @@ from database.repositories import (
     get_training_day,
     mark_workout_set_done,
     reset_statistics,
+    switch_workout_exercise,
     update_exercise_content,
     upsert_user,
 )
@@ -39,11 +40,13 @@ from handlers.states import (
     EditExerciseContent,
 )
 from services.rich_messages import (
+    build_alternative_bases_picker,
+    build_alternatives_picker,
     build_day_groups_picker,
     build_exercise_delete_confirmation,
     build_exercise_group_picker,
     build_exercises_message,
-    build_group_count_message,
+    build_group_exercises_picker,
     build_group_delete_confirmation,
     build_groups_message,
     build_invalid_workout_message,
@@ -162,8 +165,7 @@ async def start(message: Message, session: AsyncSession, state: FSMContext) -> N
         message,
         simple_rich(
             "Тренировки",
-            "<p>Собери собственную библиотеку упражнений, настрой тренировочные дни — бот сам будет формировать тренировку и присылать её по расписанию.</p>"
-            "<p><b>Ротация без повторов:</b> упражнения перемешиваются и выходят из очереди после использования, поэтому одни и те же движения не выпадают постоянно.</p>",
+            "<p>Собери собственную библиотеку упражнений, настрой тренировочные дни и выбери упражнения для каждого из них — бот будет присылать их по расписанию.</p>",
             '<tg-button-row><tg-button type="callback_data" style="primary" data="group:new">Создать группу мышц</tg-button></tg-button-row>',
         ),
         reply_markup=ReplyKeyboardRemove(),
@@ -1094,19 +1096,16 @@ async def training_day_groups(
             await callback.answer("Выбери хотя бы одну группу", show_alert=True)
             return
         await state.update_data(
-            selected_group_ids=selected, group_count_index=0, group_counts={}
+            selected_group_ids=selected, group_exercise_index=0, group_exercises={}
         )
-        await state.set_state(CreateTrainingDay.group_count)
+        await state.set_state(CreateTrainingDay.exercises)
         first_group = next(group for group in groups if group.id == selected[0])
-        max_count = min(
-            5, sum(1 for exercise in first_group.exercises if exercise.is_active)
-        )
         if callback.message:
             await edit_rich(
                 callback.bot,
                 callback.message.chat.id,
                 callback.message.message_id,
-                build_group_count_message(first_group, max_count, 1, len(selected)),
+                build_group_exercises_picker(first_group, set(), 1, len(selected)),
             )
         await callback.answer()
         return
@@ -1130,71 +1129,107 @@ async def training_day_groups(
     await callback.answer()
 
 
-@router.callback_query(CreateTrainingDay.group_count, F.data.startswith("day:count:"))
-async def training_day_group_count(
+@router.callback_query(CreateTrainingDay.exercises, F.data.startswith("day:exercise:"))
+async def training_day_exercises(
     callback: CallbackQuery, state: FSMContext, session: AsyncSession
 ) -> None:
-    count = int(callback.data.rsplit(":", 1)[1])
+    action = callback.data.rsplit(":", 1)[1]
     data = await state.get_data()
-    selected = [int(value) for value in data.get("selected_group_ids", [])]
-    index = int(data.get("group_count_index", 0))
-    if index >= len(selected):
+    selected_groups = [int(value) for value in data.get("selected_group_ids", [])]
+    index = int(data.get("group_exercise_index", 0))
+    if index >= len(selected_groups):
         await state.clear()
         await callback.answer("Создание уже завершено", show_alert=True)
         return
 
-    group = await get_muscle_group(session, callback.from_user.id, selected[index])
+    group = await get_muscle_group(session, callback.from_user.id, selected_groups[index])
     if group is None or not group.is_active:
         await state.clear()
-        await callback.answer(
-            "Одна из групп была удалена. Создай день заново.", show_alert=True
-        )
+        await callback.answer("Одна из групп была удалена. Создай день заново.", show_alert=True)
         return
-    max_count = min(5, sum(1 for exercise in group.exercises if exercise.is_active))
-    if not 1 <= count <= max_count:
-        await callback.answer("Недопустимое количество", show_alert=True)
-        return
+    active_ids = {exercise.id for exercise in group.exercises if exercise.is_active}
+    group_exercises = dict(data.get("group_exercises", {}))
+    picked = list(group_exercises.get(str(group.id), []))
 
-    group_counts = dict(data.get("group_counts", {}))
-    group_counts[str(group.id)] = count
-    index += 1
-    await state.update_data(group_counts=group_counts, group_count_index=index)
-
-    if index < len(selected):
-        next_group = await get_muscle_group(
-            session, callback.from_user.id, selected[index]
-        )
-        if next_group is None or not next_group.is_active:
-            await state.clear()
-            await callback.answer(
-                "Одна из групп была удалена. Создай день заново.", show_alert=True
-            )
+    if action != "done":
+        exercise_id = int(action)
+        if exercise_id not in active_ids:
+            await callback.answer("Упражнение недоступно", show_alert=True)
             return
-        next_max = min(
-            5, sum(1 for exercise in next_group.exercises if exercise.is_active)
-        )
+        if exercise_id in picked:
+            picked.remove(exercise_id)
+        else:
+            picked.append(exercise_id)
+        group_exercises[str(group.id)] = picked
+        await state.update_data(group_exercises=group_exercises)
         if callback.message:
             await edit_rich(
-                callback.bot,
-                callback.message.chat.id,
-                callback.message.message_id,
-                build_group_count_message(
-                    next_group, next_max, index + 1, len(selected)
+                callback.bot, callback.message.chat.id, callback.message.message_id,
+                build_group_exercises_picker(
+                    group, set(picked), index + 1, len(selected_groups)
                 ),
             )
         await callback.answer()
         return
 
-    latest = await state.get_data()
-    hours, minutes = map(int, latest["reminder_time"].split(":"))
-    pairs = [(group_id, int(group_counts[str(group_id)])) for group_id in selected]
+    if not picked:
+        await callback.answer("Выбери хотя бы одно упражнение", show_alert=True)
+        return
+    group_exercises[str(group.id)] = list(picked)
+    index += 1
+    await state.update_data(group_exercises=group_exercises, group_exercise_index=index)
+
+    if index < len(selected_groups):
+        next_group = await get_muscle_group(session, callback.from_user.id, selected_groups[index])
+        if next_group is None or not next_group.is_active:
+            await state.clear()
+            await callback.answer("Одна из групп была удалена. Создай день заново.", show_alert=True)
+            return
+        if callback.message:
+            await edit_rich(
+                callback.bot, callback.message.chat.id, callback.message.message_id,
+                build_group_exercises_picker(next_group, set(), index + 1, len(selected_groups)),
+            )
+        await callback.answer()
+        return
+
+    selected_exercise_ids = [
+        exercise_id
+        for group_id in selected_groups
+        for exercise_id in group_exercises[str(group_id)]
+    ]
+    all_exercises = await get_active_exercises(session, callback.from_user.id)
+    selected_exercises = [
+        exercise for exercise in all_exercises if exercise.id in selected_exercise_ids
+    ]
+    await state.update_data(
+        alternative_base_ids=[], alternative_base_index=0, alternatives={}
+    )
+    await state.set_state(CreateTrainingDay.alternative_bases)
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_alternative_bases_picker(selected_exercises, set()),
+        )
+    await callback.answer()
+
+
+async def finish_training_day(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    data = await state.get_data()
+    selected_groups = [int(value) for value in data["selected_group_ids"]]
+    group_exercises = dict(data["group_exercises"])
+    pairs = [(group_id, group_exercises[str(group_id)]) for group_id in selected_groups]
+    hours, minutes = map(int, data["reminder_time"].split(":"))
     training_day = await create_training_day(
         session,
         callback.from_user.id,
-        latest["name"],
-        int(latest["weekdays_mask"]),
+        data["name"],
+        int(data["weekdays_mask"]),
         time(hours, minutes),
         pairs,
+        {int(key): value for key, value in dict(data.get("alternatives", {})).items()},
     )
     await state.clear()
     group_text = ", ".join(
@@ -1205,17 +1240,125 @@ async def training_day_group_count(
         "Тренировочный день создан",
         f"<p><b>{escape(training_day.name)}</b><br>{escape(mask_to_text(training_day.weekdays_mask))} · "
         f"{training_day.reminder_time.strftime('%H:%M')}</p><p>{escape(group_text)}</p>"
-        "<p>В назначенный день бот автоматически соберёт упражнения через ротацию без частых повторов.</p>",
+        "<p>В каждую тренировку войдут выбранные упражнения.</p>",
         '<tg-button-row><tg-button type="callback_data" style="primary" data="day:new">Добавить ещё</tg-button>'
         '<tg-button type="callback_data" data="day:list">Расписание</tg-button></tg-button-row>',
     )
     if callback.message:
-        await edit_rich(
-            callback.bot, callback.message.chat.id, callback.message.message_id, result
-        )
+        await edit_rich(callback.bot, callback.message.chat.id, callback.message.message_id, result)
     else:
         await send_rich(callback.bot, callback.from_user.id, result)
     await callback.answer("Создано")
+
+
+@router.callback_query(
+    CreateTrainingDay.alternative_bases, F.data.startswith("day:alternative_base:")
+)
+async def training_day_alternative_bases(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    action = callback.data.rsplit(":", 1)[1]
+    data = await state.get_data()
+    selected_ids = [
+        exercise_id
+        for group_id in data["selected_group_ids"]
+        for exercise_id in data["group_exercises"][str(group_id)]
+    ]
+    picked = list(data.get("alternative_base_ids", []))
+    if action == "done":
+        picked = [exercise_id for exercise_id in picked if exercise_id in selected_ids]
+        if not picked:
+            await finish_training_day(callback, state, session)
+            return
+        await state.update_data(alternative_base_ids=picked, alternative_base_index=0)
+        await state.set_state(CreateTrainingDay.alternatives)
+        base = await get_exercise(session, callback.from_user.id, picked[0])
+        choices = await get_active_exercises(session, callback.from_user.id)
+        if base is None:
+            await callback.answer("Упражнение недоступно", show_alert=True)
+            return
+        if callback.message:
+            await edit_rich(
+                callback.bot, callback.message.chat.id, callback.message.message_id,
+                build_alternatives_picker(base, choices, set(), 1, len(picked)),
+            )
+        await callback.answer()
+        return
+
+    exercise_id = int(action)
+    if exercise_id not in selected_ids:
+        await callback.answer("Упражнение недоступно", show_alert=True)
+        return
+    if exercise_id in picked:
+        picked.remove(exercise_id)
+    else:
+        picked.append(exercise_id)
+    exercises = await get_active_exercises(session, callback.from_user.id)
+    await state.update_data(alternative_base_ids=picked)
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_alternative_bases_picker(
+                [exercise for exercise in exercises if exercise.id in selected_ids], set(picked)
+            ),
+        )
+    await callback.answer()
+
+
+@router.callback_query(CreateTrainingDay.alternatives, F.data.startswith("day:alternative:"))
+async def training_day_alternatives(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    action = callback.data.rsplit(":", 1)[1]
+    data = await state.get_data()
+    base_ids = [int(value) for value in data["alternative_base_ids"]]
+    index = int(data.get("alternative_base_index", 0))
+    base = await get_exercise(session, callback.from_user.id, base_ids[index])
+    choices = await get_active_exercises(session, callback.from_user.id)
+    if base is None:
+        await callback.answer("Упражнение недоступно", show_alert=True)
+        return
+    alternatives = dict(data.get("alternatives", {}))
+    picked = list(alternatives.get(str(base.id), []))
+    choice_ids = {exercise.id for exercise in choices if exercise.id != base.id}
+    if action != "done":
+        exercise_id = int(action)
+        if exercise_id not in choice_ids:
+            await callback.answer("Упражнение недоступно", show_alert=True)
+            return
+        if exercise_id in picked:
+            picked.remove(exercise_id)
+        else:
+            picked.append(exercise_id)
+        alternatives[str(base.id)] = picked
+        await state.update_data(alternatives=alternatives)
+        if callback.message:
+            await edit_rich(
+                callback.bot, callback.message.chat.id, callback.message.message_id,
+                build_alternatives_picker(base, choices, set(picked), index + 1, len(base_ids)),
+            )
+        await callback.answer()
+        return
+
+    if not picked:
+        await callback.answer("Выбери хотя бы одну замену", show_alert=True)
+        return
+    alternatives[str(base.id)] = picked
+    index += 1
+    await state.update_data(alternatives=alternatives, alternative_base_index=index)
+    if index >= len(base_ids):
+        await finish_training_day(callback, state, session)
+        return
+    next_base = await get_exercise(session, callback.from_user.id, base_ids[index])
+    if next_base is None:
+        await callback.answer("Упражнение недоступно", show_alert=True)
+        return
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_alternatives_picker(next_base, choices, set(), index + 1, len(base_ids)),
+        )
+    await callback.answer()
 
 
 @router.message(Command("days"))
@@ -1338,6 +1481,28 @@ async def today_callback(callback: CallbackQuery, session: AsyncSession) -> None
         callback.bot, callback.from_user.id, callback.from_user.id, session
     )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("workout:replace:"))
+async def replace_workout_exercise(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    workout_exercise_id = int(callback.data.rsplit(":", 1)[1])
+    workout = await switch_workout_exercise(
+        session, callback.from_user.id, workout_exercise_id
+    )
+    if workout is None:
+        await callback.answer("Замены для упражнения не найдены", show_alert=True)
+        return
+    current_streak, _ = await streaks(
+        session, callback.from_user.id, workout.scheduled_date
+    )
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_workout_dashboard(workout, current_streak),
+        )
+    await callback.answer("Упражнение заменено")
 
 
 @router.callback_query(F.data.startswith("workout:set:"))

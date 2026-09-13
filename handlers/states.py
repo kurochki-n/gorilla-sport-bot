@@ -25,4 +25,6 @@ class CreateTrainingDay(StatesGroup):
     weekdays = State()
     reminder_time = State()
     groups = State()
-    group_count = State()
+    exercises = State()
+    alternative_bases = State()
+    alternatives = State()

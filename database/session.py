@@ -35,6 +35,54 @@ async def init_db() -> None:
                     )
                 )
 
+        # Старые тренировочные дни хранили только количество упражнений.
+        # Для них один раз закрепляем первые активные упражнения каждой группы.
+        await connection.execute(
+            text(
+                """
+                INSERT INTO training_day_exercises (training_day_id, exercise_id, position)
+                SELECT training_day_id, exercise_id, group_position + group_order * 1000
+                FROM (
+                    SELECT
+                        tdg.training_day_id,
+                        exercise.id AS exercise_id,
+                        tdg.position AS group_order,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY tdg.training_day_id, tdg.muscle_group_id
+                            ORDER BY exercise.id
+                        ) AS group_position,
+                        tdg.exercise_count
+                    FROM training_day_groups AS tdg
+                    JOIN exercises AS exercise
+                        ON exercise.muscle_group_id = tdg.muscle_group_id
+                        AND exercise.is_active = 1
+                ) AS legacy
+                WHERE group_position <= exercise_count
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM training_day_exercises AS selected
+                    WHERE selected.training_day_id = legacy.training_day_id
+                      AND selected.exercise_id = legacy.exercise_id
+                )
+                """
+            )
+        )
+        await connection.execute(text("DROP TABLE IF EXISTS rotation_entries"))
+
+        workout_exercise_columns = await connection.run_sync(
+            lambda sync_connection: {
+                column["name"]
+                for column in inspect(sync_connection).get_columns("workout_exercises")
+            }
+        )
+        if "training_day_exercise_id" not in workout_exercise_columns:
+            await connection.execute(
+                text(
+                    "ALTER TABLE workout_exercises "
+                    "ADD COLUMN training_day_exercise_id INTEGER"
+                )
+            )
+
 
 async def close_db() -> None:
     await engine.dispose()

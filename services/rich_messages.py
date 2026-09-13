@@ -138,7 +138,6 @@ def build_exercises_message(exercises: list[Exercise]) -> InputRichMessage:
                 f'<tr><td>{escape(exercise.target_text)}</td><td align="right">{rest}</td></tr>'
                 "</table>"
                 f'<tg-button-row align="right"><tg-button type="callback_data" data="exercise:details:{exercise.id}">Посмотреть</tg-button>'
-                f'<tg-button type="callback_data" data="exercise:content:{exercise.id}">Описание и медиа</tg-button>'
                 f'<tg-button type="callback_data" style="danger" data="exercise:delete:{exercise.id}">Удалить</tg-button></tg-button-row>'
             )
     blocks.append(
@@ -177,23 +176,78 @@ def build_day_groups_picker(
     )
     return simple_rich(
         "Новый тренировочный день · группы",
-        "<p>Выбери группы мышц. Для каждой дальше настроим количество упражнений.</p>",
+        "<p>Выбери группы мышц. Для каждой дальше выберем упражнения.</p>",
         "".join(rows),
     )
 
 
-def build_group_count_message(
-    group: MuscleGroup, max_count: int, index: int, total: int
+def build_group_exercises_picker(
+    group: MuscleGroup, selected_ids: set[int], index: int, total: int
 ) -> InputRichMessage:
-    buttons = "".join(
-        f'<tg-button type="callback_data" style="primary" data="day:count:{count}">{count}</tg-button>'
-        for count in range(1, max_count + 1)
+    exercises = [exercise for exercise in group.exercises if exercise.is_active]
+    rows = []
+    for exercise in exercises:
+        selected = exercise.id in selected_ids
+        style = "success" if selected else "primary"
+        prefix = "✓ " if selected else ""
+        rows.append(
+            f'<tg-button-row><tg-button type="callback_data" style="{style}" data="day:exercise:{exercise.id}">{prefix}{escape(exercise.name)}</tg-button></tg-button-row>'
+        )
+    rows.append(
+        '<tg-button-row><tg-button type="callback_data" style="success" data="day:exercise:done">Продолжить</tg-button></tg-button-row>'
     )
     return simple_rich(
         f"{group.name} · {index}/{total}",
-        f"<p>Сколько упражнений из группы <b>{escape(group.name)}</b> включать в одну тренировку?</p>"
-        f"<p>Доступно активных упражнений: <b>{max_count}</b>.</p>",
-        f'<tg-button-row align="left">{buttons}</tg-button-row>',
+        f"<p>Выбери упражнения для группы <b>{escape(group.name)}</b>. Они будут повторяться в каждой тренировке.</p>",
+        "".join(rows),
+    )
+
+
+def build_alternative_bases_picker(
+    exercises: list[Exercise], selected_ids: set[int]
+) -> InputRichMessage:
+    rows = []
+    for exercise in exercises:
+        selected = exercise.id in selected_ids
+        style = "success" if selected else "primary"
+        prefix = "✓ " if selected else ""
+        rows.append(
+            f'<tg-button-row><tg-button type="callback_data" style="{style}" data="day:alternative_base:{exercise.id}">{prefix}{escape(exercise.name)}</tg-button></tg-button-row>'
+        )
+    rows.append(
+        '<tg-button-row><tg-button type="callback_data" style="success" data="day:alternative_base:done">Продолжить</tg-button></tg-button-row>'
+    )
+    return simple_rich(
+        "Альтернативные упражнения",
+        "<p>Выбери упражнения, для которых хочешь добавить альтернативу. Этот шаг можно пропустить.</p>",
+        "".join(rows),
+    )
+
+
+def build_alternatives_picker(
+    base_exercise: Exercise,
+    exercises: list[Exercise],
+    selected_ids: set[int],
+    index: int,
+    total: int,
+) -> InputRichMessage:
+    rows = []
+    for exercise in exercises:
+        if exercise.id == base_exercise.id:
+            continue
+        selected = exercise.id in selected_ids
+        style = "success" if selected else "primary"
+        prefix = "✓ " if selected else ""
+        rows.append(
+            f'<tg-button-row><tg-button type="callback_data" style="{style}" data="day:alternative:{exercise.id}">{prefix}{escape(exercise.name)} · {escape(exercise.muscle_group.name)}</tg-button></tg-button-row>'
+        )
+    rows.append(
+        '<tg-button-row><tg-button type="callback_data" style="success" data="day:alternative:done">Сохранить замены</tg-button></tg-button-row>'
+    )
+    return simple_rich(
+        f"Замены · {index}/{total}",
+        f"<p>Выбери альтернативы для <b>{escape(base_exercise.name)}</b>. Они будут переключаться по кругу во время тренировки.</p>",
+        "".join(rows),
     )
 
 
@@ -268,9 +322,14 @@ def _set_buttons(workout_session: WorkoutSession) -> str:
                 buttons.append(
                     f'<tg-button type="callback_data" style="primary" data="workout:set:{workout_set.id}">{workout_set.position}</tg-button>'
                 )
-        blocks.append(
-            f'<tg-button-row align="left"><tg-button type="callback_data" data="exercise:details:{item.exercise_id}">Описание и медиа</tg-button></tg-button-row>'
+        action_buttons = (
+            f'<tg-button type="callback_data" data="exercise:details:{item.exercise_id}">Описание и медиа</tg-button>'
         )
+        if item.training_day_exercise and item.training_day_exercise.alternatives:
+            action_buttons += (
+                f'<tg-button type="callback_data" style="primary" data="workout:replace:{item.id}">Заменить</tg-button>'
+            )
+        blocks.append(f'<tg-button-row align="left">{action_buttons}</tg-button-row>')
         for offset in range(0, len(buttons), 6):
             blocks.append(
                 f'<tg-button-row align="left">{"".join(buttons[offset : offset + 6])}</tg-button-row>'

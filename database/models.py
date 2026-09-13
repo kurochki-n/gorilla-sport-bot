@@ -78,6 +78,9 @@ class Exercise(Base, TimestampMixin):
 
     user: Mapped[User] = relationship(back_populates="exercises")
     muscle_group: Mapped[MuscleGroup] = relationship(back_populates="exercises")
+    training_day_links: Mapped[list["TrainingDayExercise"]] = relationship(
+        back_populates="exercise"
+    )
 
 
 class TrainingDay(Base, TimestampMixin):
@@ -98,6 +101,11 @@ class TrainingDay(Base, TimestampMixin):
         back_populates="training_day",
         cascade="all, delete-orphan",
         order_by="TrainingDayGroup.position",
+    )
+    exercises: Mapped[list["TrainingDayExercise"]] = relationship(
+        back_populates="training_day",
+        cascade="all, delete-orphan",
+        order_by="TrainingDayExercise.position",
     )
     sessions: Mapped[list["WorkoutSession"]] = relationship(
         back_populates="training_day"
@@ -131,6 +139,53 @@ class TrainingDayGroup(Base, TimestampMixin):
     muscle_group: Mapped[MuscleGroup] = relationship(
         back_populates="training_day_links"
     )
+
+
+class TrainingDayExercise(Base, TimestampMixin):
+    __tablename__ = "training_day_exercises"
+    __table_args__ = (
+        UniqueConstraint("training_day_id", "exercise_id", name="uq_training_day_exercise"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    training_day_id: Mapped[int] = mapped_column(
+        ForeignKey("training_days.id", ondelete="CASCADE"), index=True
+    )
+    exercise_id: Mapped[int] = mapped_column(
+        ForeignKey("exercises.id", ondelete="RESTRICT"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=1)
+
+    training_day: Mapped[TrainingDay] = relationship(back_populates="exercises")
+    exercise: Mapped[Exercise] = relationship(back_populates="training_day_links")
+    alternatives: Mapped[list["TrainingDayExerciseAlternative"]] = relationship(
+        back_populates="training_day_exercise",
+        cascade="all, delete-orphan",
+        order_by="TrainingDayExerciseAlternative.position",
+    )
+
+
+class TrainingDayExerciseAlternative(Base, TimestampMixin):
+    __tablename__ = "training_day_exercise_alternatives"
+    __table_args__ = (
+        UniqueConstraint(
+            "training_day_exercise_id", "exercise_id", name="uq_training_day_exercise_alternative"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    training_day_exercise_id: Mapped[int] = mapped_column(
+        ForeignKey("training_day_exercises.id", ondelete="CASCADE"), index=True
+    )
+    exercise_id: Mapped[int] = mapped_column(
+        ForeignKey("exercises.id", ondelete="RESTRICT"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=1)
+
+    training_day_exercise: Mapped[TrainingDayExercise] = relationship(
+        back_populates="alternatives"
+    )
+    exercise: Mapped[Exercise] = relationship()
 
 
 class WorkoutSession(Base, TimestampMixin):
@@ -188,6 +243,9 @@ class WorkoutExercise(Base, TimestampMixin):
     exercise_id: Mapped[int] = mapped_column(
         ForeignKey("exercises.id", ondelete="RESTRICT"), index=True
     )
+    training_day_exercise_id: Mapped[int | None] = mapped_column(
+        ForeignKey("training_day_exercises.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     muscle_group_id: Mapped[int] = mapped_column(
         ForeignKey("muscle_groups.id", ondelete="RESTRICT"), index=True
     )
@@ -203,6 +261,7 @@ class WorkoutExercise(Base, TimestampMixin):
     )
 
     session: Mapped[WorkoutSession] = relationship(back_populates="exercises")
+    training_day_exercise: Mapped[TrainingDayExercise | None] = relationship()
     sets: Mapped[list["WorkoutSet"]] = relationship(
         back_populates="workout_exercise",
         cascade="all, delete-orphan",
@@ -231,34 +290,6 @@ class WorkoutSet(Base, TimestampMixin):
     )
 
     workout_exercise: Mapped[WorkoutExercise] = relationship(back_populates="sets")
-
-
-class RotationEntry(Base, TimestampMixin):
-    __tablename__ = "rotation_entries"
-    __table_args__ = (
-        UniqueConstraint(
-            "muscle_group_id",
-            "week_start",
-            "round_no",
-            "exercise_id",
-            name="uq_rotation_entry",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    muscle_group_id: Mapped[int] = mapped_column(
-        ForeignKey("muscle_groups.id", ondelete="CASCADE"), index=True
-    )
-    exercise_id: Mapped[int] = mapped_column(
-        ForeignKey("exercises.id", ondelete="CASCADE"), index=True
-    )
-    week_start: Mapped[date] = mapped_column(Date, index=True)
-    round_no: Mapped[int] = mapped_column(Integer, default=1)
-    position: Mapped[int] = mapped_column(Integer)
-    is_used: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
 
 
 class NotificationLog(Base, TimestampMixin):

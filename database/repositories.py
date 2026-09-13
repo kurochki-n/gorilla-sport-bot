@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
@@ -11,8 +10,9 @@ from database.models import (
     Exercise,
     MuscleGroup,
     NotificationLog,
-    RotationEntry,
     TrainingDay,
+    TrainingDayExercise,
+    TrainingDayExerciseAlternative,
     TrainingDayGroup,
     User,
     WorkoutExercise,
@@ -186,7 +186,8 @@ async def create_training_day(
     name: str,
     weekdays_mask: int,
     reminder_time,
-    group_counts: list[tuple[int, int]],
+    group_exercises: list[tuple[int, list[int]]],
+    alternatives: dict[int, list[int]],
 ) -> TrainingDay:
     training_day = TrainingDay(
         user_id=user_id,
@@ -196,15 +197,42 @@ async def create_training_day(
     )
     session.add(training_day)
     await session.flush()
-    for position, (group_id, count) in enumerate(group_counts, start=1):
+    selected_links: dict[int, TrainingDayExercise] = {}
+    exercise_position = 1
+    for group_position, (group_id, exercise_ids) in enumerate(
+        group_exercises, start=1
+    ):
         session.add(
             TrainingDayGroup(
                 training_day_id=training_day.id,
                 muscle_group_id=group_id,
-                exercise_count=count,
-                position=position,
+                exercise_count=len(exercise_ids),
+                position=group_position,
             )
         )
+        for exercise_id in exercise_ids:
+            selected_link = TrainingDayExercise(
+                training_day_id=training_day.id,
+                exercise_id=exercise_id,
+                position=exercise_position,
+            )
+            session.add(selected_link)
+            selected_links[exercise_id] = selected_link
+            exercise_position += 1
+    await session.flush()
+    for source_exercise_id, alternative_ids in alternatives.items():
+        selected_link = selected_links.get(source_exercise_id)
+        if selected_link is None:
+            continue
+        for position, exercise_id in enumerate(alternative_ids, start=1):
+            if exercise_id != source_exercise_id:
+                session.add(
+                    TrainingDayExerciseAlternative(
+                        training_day_exercise_id=selected_link.id,
+                        exercise_id=exercise_id,
+                        position=position,
+                    )
+                )
     await session.commit()
     return await get_training_day(session, user_id, training_day.id)
 
@@ -217,7 +245,10 @@ async def get_active_training_days(
         .options(
             selectinload(TrainingDay.muscle_groups).selectinload(
                 TrainingDayGroup.muscle_group
-            )
+            ),
+            selectinload(TrainingDay.exercises)
+            .selectinload(TrainingDayExercise.exercise)
+            .selectinload(Exercise.muscle_group),
         )
         .where(TrainingDay.user_id == user_id, TrainingDay.is_active.is_(True))
         .order_by(TrainingDay.id)
@@ -233,7 +264,10 @@ async def get_all_training_days(
         .options(
             selectinload(TrainingDay.muscle_groups).selectinload(
                 TrainingDayGroup.muscle_group
-            )
+            ),
+            selectinload(TrainingDay.exercises)
+            .selectinload(TrainingDayExercise.exercise)
+            .selectinload(Exercise.muscle_group),
         )
         .where(TrainingDay.user_id == user_id)
         .order_by(TrainingDay.id)
@@ -249,7 +283,10 @@ async def get_training_day(
         .options(
             selectinload(TrainingDay.muscle_groups).selectinload(
                 TrainingDayGroup.muscle_group
-            )
+            ),
+            selectinload(TrainingDay.exercises)
+            .selectinload(TrainingDayExercise.exercise)
+            .selectinload(Exercise.muscle_group),
         )
         .where(TrainingDay.id == training_day_id, TrainingDay.user_id == user_id)
     )
@@ -284,113 +321,6 @@ async def deactivate_training_day(
     return training_day
 
 
-async def _last_used_dates(
-    session: AsyncSession,
-    exercise_ids: list[int],
-) -> dict[int, date]:
-    if not exercise_ids:
-        return {}
-    rows = await session.execute(
-        select(WorkoutExercise.exercise_id, func.max(WorkoutSession.scheduled_date))
-        .join(WorkoutSession, WorkoutSession.id == WorkoutExercise.session_id)
-        .where(WorkoutExercise.exercise_id.in_(exercise_ids))
-        .group_by(WorkoutExercise.exercise_id)
-    )
-    return {
-        exercise_id: used_date
-        for exercise_id, used_date in rows.all()
-        if used_date is not None
-    }
-
-
-async def _create_rotation_round(
-    session: AsyncSession,
-    muscle_group_id: int,
-    exercises: list[Exercise],
-    week_start: date,
-    avoid_ids: set[int] | None = None,
-) -> None:
-    avoid_ids = avoid_ids or set()
-    max_round = await session.scalar(
-        select(func.max(RotationEntry.round_no)).where(
-            RotationEntry.muscle_group_id == muscle_group_id,
-            RotationEntry.week_start == week_start,
-        )
-    )
-    round_no = int(max_round or 0) + 1
-
-    ids = [exercise.id for exercise in exercises]
-    last_used = await _last_used_dates(session, ids)
-    random.SystemRandom().shuffle(ids)
-    ids.sort(
-        key=lambda exercise_id: (
-            exercise_id in avoid_ids,
-            last_used.get(exercise_id, date.min),
-        )
-    )
-    for position, exercise_id in enumerate(ids, start=1):
-        session.add(
-            RotationEntry(
-                muscle_group_id=muscle_group_id,
-                exercise_id=exercise_id,
-                week_start=week_start,
-                round_no=round_no,
-                position=position,
-            )
-        )
-    await session.flush()
-
-
-async def select_rotated_exercises(
-    session: AsyncSession,
-    user_id: int,
-    muscle_group_id: int,
-    count: int,
-    scheduled_date: date,
-) -> list[Exercise]:
-    exercises = await get_active_exercises(session, user_id, muscle_group_id)
-    if not exercises:
-        return []
-    count = min(count, len(exercises))
-    active_by_id = {exercise.id: exercise for exercise in exercises}
-    week_start = scheduled_date - timedelta(days=scheduled_date.weekday())
-    selected: list[Exercise] = []
-    selected_ids: set[int] = set()
-
-    while len(selected) < count:
-        entries = list(
-            await session.scalars(
-                select(RotationEntry)
-                .where(
-                    RotationEntry.muscle_group_id == muscle_group_id,
-                    RotationEntry.week_start == week_start,
-                    RotationEntry.is_used.is_(False),
-                    RotationEntry.exercise_id.in_(active_by_id.keys()),
-                )
-                .order_by(RotationEntry.round_no, RotationEntry.position)
-            )
-        )
-        entries = [entry for entry in entries if entry.exercise_id not in selected_ids]
-        if not entries:
-            await _create_rotation_round(
-                session,
-                muscle_group_id,
-                exercises,
-                week_start,
-                avoid_ids=selected_ids,
-            )
-            continue
-
-        entry = entries[0]
-        entry.is_used = True
-        entry.used_at = datetime.now(timezone.utc)
-        selected.append(active_by_id[entry.exercise_id])
-        selected_ids.add(entry.exercise_id)
-        await session.flush()
-
-    return selected
-
-
 async def get_workout_session(
     session: AsyncSession,
     user_id: int,
@@ -401,6 +331,9 @@ async def get_workout_session(
         .options(
             selectinload(WorkoutSession.training_day),
             selectinload(WorkoutSession.exercises).selectinload(WorkoutExercise.sets),
+            selectinload(WorkoutSession.exercises)
+            .selectinload(WorkoutExercise.training_day_exercise)
+            .selectinload(TrainingDayExercise.alternatives),
         )
         .where(
             WorkoutSession.id == workout_session_id, WorkoutSession.user_id == user_id
@@ -419,6 +352,9 @@ async def get_session_for_training_day(
         .options(
             selectinload(WorkoutSession.training_day),
             selectinload(WorkoutSession.exercises).selectinload(WorkoutExercise.sets),
+            selectinload(WorkoutSession.exercises)
+            .selectinload(WorkoutExercise.training_day_exercise)
+            .selectinload(TrainingDayExercise.alternatives),
         )
         .where(
             WorkoutSession.user_id == user_id,
@@ -442,22 +378,12 @@ async def generate_workout_session(
     if existing is not None:
         return existing
 
-    selections: list[tuple[TrainingDayGroup, list[Exercise]]] = []
-    for link in sorted(training_day.muscle_groups, key=lambda item: item.position):
-        if not link.muscle_group.is_active:
-            continue
-        picked = await select_rotated_exercises(
-            session,
-            training_day.user_id,
-            link.muscle_group_id,
-            link.exercise_count,
-            scheduled_date,
-        )
-        if picked:
-            selections.append((link, picked))
-
-    if not selections:
-        await session.rollback()
+    selected_exercises = [
+        link.exercise
+        for link in training_day.exercises
+        if link.exercise.is_active and link.exercise.muscle_group.is_active
+    ]
+    if not selected_exercises:
         return None
 
     workout = WorkoutSession(
@@ -468,32 +394,82 @@ async def generate_workout_session(
     session.add(workout)
     await session.flush()
 
-    position = 1
-    for link, picked in selections:
-        for exercise in picked:
-            workout_exercise = WorkoutExercise(
-                session_id=workout.id,
-                exercise_id=exercise.id,
-                muscle_group_id=exercise.muscle_group_id,
-                exercise_name=exercise.name,
-                muscle_group_name=link.muscle_group.name,
-                sets_total=exercise.default_sets,
-                target_text=exercise.target_text,
-                rest_seconds=exercise.rest_seconds,
-                position=position,
+    for position, exercise in enumerate(selected_exercises, start=1):
+        workout_exercise = WorkoutExercise(
+            session_id=workout.id,
+            exercise_id=exercise.id,
+            training_day_exercise_id=next(
+                link.id for link in training_day.exercises if link.exercise_id == exercise.id
+            ),
+            muscle_group_id=exercise.muscle_group_id,
+            exercise_name=exercise.name,
+            muscle_group_name=exercise.muscle_group.name,
+            sets_total=exercise.default_sets,
+            target_text=exercise.target_text,
+            rest_seconds=exercise.rest_seconds,
+            position=position,
+        )
+        session.add(workout_exercise)
+        await session.flush()
+        for set_position in range(1, exercise.default_sets + 1):
+            session.add(
+                WorkoutSet(workout_exercise_id=workout_exercise.id, position=set_position)
             )
-            session.add(workout_exercise)
-            await session.flush()
-            for set_position in range(1, exercise.default_sets + 1):
-                session.add(
-                    WorkoutSet(
-                        workout_exercise_id=workout_exercise.id, position=set_position
-                    )
-                )
-            position += 1
 
     await session.commit()
     return await get_workout_session(session, training_day.user_id, workout.id)
+
+
+async def switch_workout_exercise(
+    session: AsyncSession, user_id: int, workout_exercise_id: int
+) -> WorkoutSession | None:
+    workout_exercise = await session.scalar(
+        select(WorkoutExercise)
+        .options(
+            selectinload(WorkoutExercise.session),
+            selectinload(WorkoutExercise.sets),
+            selectinload(WorkoutExercise.training_day_exercise)
+            .selectinload(TrainingDayExercise.alternatives)
+            .selectinload(TrainingDayExerciseAlternative.exercise)
+            .selectinload(Exercise.muscle_group),
+            selectinload(WorkoutExercise.training_day_exercise)
+            .selectinload(TrainingDayExercise.exercise)
+            .selectinload(Exercise.muscle_group),
+        )
+        .join(WorkoutSession)
+        .where(WorkoutExercise.id == workout_exercise_id, WorkoutSession.user_id == user_id)
+    )
+    if workout_exercise is None or workout_exercise.training_day_exercise is None:
+        return None
+    source = workout_exercise.training_day_exercise
+    choices = [source.exercise] + [item.exercise for item in source.alternatives]
+    if len(choices) < 2:
+        return None
+    current_index = next(
+        (index for index, exercise in enumerate(choices) if exercise.id == workout_exercise.exercise_id),
+        -1,
+    )
+    replacement = choices[(current_index + 1) % len(choices)]
+    workout_exercise.exercise_id = replacement.id
+    workout_exercise.muscle_group_id = replacement.muscle_group_id
+    workout_exercise.exercise_name = replacement.name
+    workout_exercise.muscle_group_name = replacement.muscle_group.name
+    workout_exercise.sets_total = replacement.default_sets
+    workout_exercise.target_text = replacement.target_text
+    workout_exercise.rest_seconds = replacement.rest_seconds
+    workout_exercise.sets_done = 0
+    workout_exercise.completed_at = None
+    workout_exercise.session.completed_at = None
+    await session.execute(
+        delete(WorkoutSet).where(WorkoutSet.workout_exercise_id == workout_exercise.id)
+    )
+    await session.flush()
+    for position in range(1, replacement.default_sets + 1):
+        session.add(WorkoutSet(workout_exercise_id=workout_exercise.id, position=position))
+    session_id = workout_exercise.session_id
+    await session.commit()
+    session.expire_all()
+    return await get_workout_session(session, user_id, session_id)
 
 
 async def get_sessions_for_day(
