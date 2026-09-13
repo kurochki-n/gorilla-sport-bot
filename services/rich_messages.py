@@ -398,10 +398,10 @@ def build_workout_exercise(
     control_rows: list[str] = []
     if not workout_set.is_done:
         control_rows = [
-            f'<tg-button-row align="left"><tg-button type="callback_data" data="workout:value:{workout_set.id}:load:-">Нагрузка −</tg-button>'
-            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:+">Нагрузка +</tg-button></tg-button-row>',
-            f'<tg-button-row align="left"><tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:-">Повторения −</tg-button>'
-            f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:+">Повторения +</tg-button></tg-button-row>',
+            f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:load:-">Нагрузка −</tg-button></tg-button-row>',
+            f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:load:+">Нагрузка +</tg-button></tg-button-row>',
+            f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:-">Повторения −</tg-button></tg-button-row>',
+            f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:+">Повторения +</tg-button></tg-button-row>',
             f'<tg-button-row><tg-button type="callback_data" style="success" data="workout:set:{workout_set.id}">Завершить подход</tg-button></tg-button-row>',
         ]
     action_buttons = ""
