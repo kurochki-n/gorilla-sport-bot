@@ -135,7 +135,7 @@ def build_exercises_message(exercises: list[Exercise]) -> InputRichMessage:
             blocks.append(
                 "<table compact>"
                 f'<tr><td><b>{escape(exercise.name)}</b></td><td align="right">{exercise.default_sets} подх.</td></tr>'
-                f'<tr><td>{escape(exercise.target_text)}</td><td align="right">{rest}</td></tr>'
+                f'<tr><td>Нагрузка: {escape(exercise.load_unit or "не задана")}</td><td align="right">{rest}</td></tr>'
                 "</table>"
                 f'<tg-button-row align="right"><tg-button type="callback_data" data="exercise:details:{exercise.id}">Посмотреть</tg-button>'
                 f'<tg-button type="callback_data" data="exercise:edit:{exercise.id}">Изменить</tg-button>'
@@ -383,11 +383,19 @@ def build_workout_exercise(
     item = next((exercise for exercise in exercises if exercise.position == position), None)
     if item is None:
         return build_workout_overview(workout_session, streak)
+    if item.load_unit is None:
+        return simple_rich(
+            item.exercise_name,
+            "<p>Выбери тип нагрузки для этого упражнения.</p>",
+            f'<tg-button-row><tg-button type="callback_data" data="workout:unit:{item.id}:кг">кг</tg-button>'
+            f'<tg-button type="callback_data" data="workout:unit:{item.id}:км">км</tg-button>'
+            f'<tg-button type="callback_data" data="workout:unit:{item.id}:сек">сек</tg-button></tg-button-row>',
+        )
     streak_text = f" · 🔥 <b>{streak}</b>" if streak else ""
     complete_mark = " ✅" if item.is_completed else ""
     ordered_sets = sorted(item.sets, key=lambda set_item: set_item.position)
     workout_set = next((set_item for set_item in ordered_sets if not set_item.is_done), ordered_sets[-1])
-    unit = item.load_unit
+    unit = item.load_unit or "—"
     load = "—" if workout_set.load_value is None else f"{workout_set.load_value:g} {unit}"
     reps = "—" if workout_set.repetitions is None else str(workout_set.repetitions)
     set_rows = [
@@ -430,7 +438,7 @@ def build_workout_exercise(
         f"<h3>{escape(workout_session.training_day.name)}</h3>",
         f"<p><b>{position}/{len(exercises)} · {escape(item.muscle_group_name)}</b>{streak_text}</p>",
         f"<p><b>{escape(item.exercise_name)}{complete_mark}</b></p>",
-        f"<p>{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
+        f"<p>{item.sets_total} подхода · отдых {item.rest_seconds} сек</p>",
         f'<tg-button-row align="left">{action_buttons}</tg-button-row>',
         "".join(set_rows),
     ]

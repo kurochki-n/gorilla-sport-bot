@@ -38,6 +38,7 @@ from database.repositories import (
     mark_workout_set_done,
     reset_statistics,
     restart_workout_session,
+    set_workout_exercise_unit,
     switch_workout_exercise,
     update_exercise_content,
     update_exercise_field,
@@ -455,17 +456,19 @@ async def exercise_sets(callback: CallbackQuery, state: FSMContext) -> None:
     if not 1 <= sets_count <= 6:
         await callback.answer("Недопустимое число подходов", show_alert=True)
         return
-    await state.update_data(default_sets=sets_count)
-    await state.set_state(CreateExercise.target)
+    await state.update_data(default_sets=sets_count, target_text="")
+    await state.set_state(CreateExercise.load_unit)
     if callback.message:
         await edit_rich(
             callback.bot,
             callback.message.chat.id,
             callback.message.message_id,
             simple_rich(
-                "Новое упражнение · 4/7",
-                "<p>Отправь цель одного подхода.</p>"
-                "<p><i>Например: 8–12 повторений, 10 повторений, 40 секунд.</i></p>",
+                "Тип нагрузки",
+                "<p>Выбери единицу нагрузки. Значения нагрузки и повторений задаются во время тренировки.</p>",
+                '<tg-button-row><tg-button type="callback_data" data="exercise:load_unit:кг">кг</tg-button>'
+                '<tg-button type="callback_data" data="exercise:load_unit:км">км</tg-button>'
+                '<tg-button type="callback_data" data="exercise:load_unit:сек">сек</tg-button></tg-button-row>',
             ),
         )
     await callback.answer()
@@ -713,8 +716,7 @@ async def exercise_details(callback: CallbackQuery, session: AsyncSession) -> No
         f"<b>{escape(exercise.name)}</b>\n"
         f"<i>{escape(exercise.muscle_group.name)}</i>\n\n"
         f"{escape(description)}\n\n"
-        f"{exercise.default_sets} × {escape(exercise.target_text)} · "
-        f"отдых {exercise.rest_seconds} сек"
+        f"{exercise.default_sets} подхода · отдых {exercise.rest_seconds} сек"
     )
     hide_button = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -779,8 +781,7 @@ async def exercise_edit_menu(callback: CallbackQuery, session: AsyncSession) -> 
                 "<p>Выбери параметр для изменения.</p>",
                 f'<tg-button-row><tg-button type="callback_data" data="exercise:field:{exercise.id}:name">Название</tg-button>'
                 f'<tg-button type="callback_data" data="exercise:field:{exercise.id}:default_sets">Подходы</tg-button></tg-button-row>'
-                f'<tg-button-row><tg-button type="callback_data" data="exercise:field:{exercise.id}:target_text">Цель</tg-button>'
-                f'<tg-button type="callback_data" data="exercise:field:{exercise.id}:rest_seconds">Отдых</tg-button></tg-button-row>'
+                f'<tg-button-row><tg-button type="callback_data" data="exercise:field:{exercise.id}:rest_seconds">Отдых</tg-button></tg-button-row>'
                 f'<tg-button-row><tg-button type="callback_data" data="exercise:unit:{exercise.id}:кг">кг</tg-button>'
                 f'<tg-button type="callback_data" data="exercise:unit:{exercise.id}:км">км</tg-button>'
                 f'<tg-button type="callback_data" data="exercise:unit:{exercise.id}:сек">сек</tg-button></tg-button-row>'
@@ -1744,6 +1745,22 @@ async def replace_workout_exercise(
             build_workout_exercise(workout, position, current_streak),
         )
     await callback.answer("Упражнение заменено")
+
+
+@router.callback_query(F.data.startswith("workout:unit:"))
+async def set_workout_unit(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, workout_exercise_id, load_unit = callback.data.split(":")
+    workout = await set_workout_exercise_unit(
+        session, callback.from_user.id, int(workout_exercise_id), load_unit
+    )
+    if workout is None:
+        await callback.answer("Не удалось сохранить тип нагрузки", show_alert=True)
+        return
+    exercise = next(item for item in workout.exercises if item.id == int(workout_exercise_id))
+    current_streak, _ = await streaks(session, callback.from_user.id, workout.scheduled_date)
+    if callback.message:
+        await edit_rich(callback.bot, callback.message.chat.id, callback.message.message_id, build_workout_exercise(workout, exercise.position, current_streak))
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("workout:value:"))

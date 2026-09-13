@@ -607,6 +607,28 @@ async def get_sessions_for_day(
     return list(result.unique())
 
 
+async def set_workout_exercise_unit(
+    session: AsyncSession, user_id: int, workout_exercise_id: int, load_unit: str
+) -> WorkoutSession | None:
+    if load_unit not in {"кг", "км", "сек"}:
+        return None
+    workout_exercise = await session.scalar(
+        select(WorkoutExercise).options(selectinload(WorkoutExercise.session))
+        .join(WorkoutSession)
+        .where(WorkoutExercise.id == workout_exercise_id, WorkoutSession.user_id == user_id)
+    )
+    if workout_exercise is None:
+        return None
+    exercise = await get_exercise(session, user_id, workout_exercise.exercise_id)
+    if exercise is None:
+        return None
+    exercise.load_unit = load_unit
+    workout_exercise.load_unit = load_unit
+    session_id = workout_exercise.session_id
+    await session.commit()
+    return await get_workout_session(session, user_id, session_id)
+
+
 async def adjust_workout_set_value(
     session: AsyncSession, user_id: int, set_id: int, field: str, delta: int
 ) -> WorkoutSession | None:
