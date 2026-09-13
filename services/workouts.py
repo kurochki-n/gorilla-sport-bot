@@ -6,7 +6,14 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import TrainingDay, WorkoutExercise, WorkoutSession, WorkoutSet
+from database.models import (
+    Exercise,
+    ExerciseSetPreset,
+    TrainingDay,
+    WorkoutExercise,
+    WorkoutSession,
+    WorkoutSet,
+)
 from database.repositories import get_all_training_days, get_active_training_days
 
 
@@ -160,6 +167,53 @@ async def stats(
         "completion": completion,
         "streak": current,
         "best_streak": best,
+    }
+
+
+async def exercise_statistics(
+    session: AsyncSession, user_id: int, exercise_id: int
+) -> dict | None:
+    exercise = await session.scalar(
+        select(Exercise).where(Exercise.id == exercise_id, Exercise.user_id == user_id)
+    )
+    if exercise is None:
+        return None
+    row = await session.execute(
+        select(
+            func.count(WorkoutSet.id),
+            func.coalesce(func.sum(WorkoutSet.repetitions), 0),
+            func.max(WorkoutSet.repetitions),
+            func.max(WorkoutSet.load_value),
+            func.max(WorkoutSession.scheduled_date),
+        )
+        .join(WorkoutExercise, WorkoutExercise.id == WorkoutSet.workout_exercise_id)
+        .join(WorkoutSession, WorkoutSession.id == WorkoutExercise.session_id)
+        .where(
+            WorkoutSession.user_id == user_id,
+            WorkoutExercise.exercise_id == exercise_id,
+            WorkoutSet.is_done.is_(True),
+        )
+    )
+    sets_done, repetitions_total, repetitions_best, load_best, last_date = row.one()
+    presets = list(
+        await session.scalars(
+            select(ExerciseSetPreset)
+            .where(
+                ExerciseSetPreset.user_id == user_id,
+                ExerciseSetPreset.exercise_id == exercise_id,
+            )
+            .order_by(ExerciseSetPreset.position)
+        )
+    )
+    return {
+        "name": exercise.name,
+        "unit": exercise.load_unit or "не задан",
+        "sets_done": int(sets_done or 0),
+        "repetitions_total": int(repetitions_total or 0),
+        "repetitions_best": int(repetitions_best or 0),
+        "load_best": load_best,
+        "last_date": last_date,
+        "presets": presets,
     }
 
 

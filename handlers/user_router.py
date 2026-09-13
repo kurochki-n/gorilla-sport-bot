@@ -57,6 +57,8 @@ from services.rich_messages import (
     build_day_groups_picker,
     build_exercise_delete_confirmation,
     build_exercise_group_picker,
+    build_exercise_statistics_message,
+    build_exercise_statistics_picker,
     build_exercises_message,
     build_exercises_messages,
     build_group_exercises_picker,
@@ -75,7 +77,13 @@ from services.rich_messages import (
     send_rich,
     simple_rich,
 )
-from services.workouts import calendar_data, scheduled_training_days, stats, streaks
+from services.workouts import (
+    calendar_data,
+    exercise_statistics,
+    scheduled_training_days,
+    stats,
+    streaks,
+)
 from utils.dates import mask_to_text
 
 router = Router(name=__name__)
@@ -1856,6 +1864,32 @@ async def statistics(message: Message, session: AsyncSession) -> None:
     bot_info = await message.bot.get_me()
     reset_link = f"https://t.me/{bot_info.username}?start=reset_stats"
     await send_screen(message, build_stats_message(data, calendar, reset_link))
+
+
+@router.callback_query(F.data == "stats:exercises")
+async def exercise_statistics_list(callback: CallbackQuery, session: AsyncSession) -> None:
+    exercises = await get_active_exercises(session, callback.from_user.id)
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_exercise_statistics_picker(exercises),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("stats:exercise:"))
+async def exercise_statistics_details(callback: CallbackQuery, session: AsyncSession) -> None:
+    exercise_id = int(callback.data.rsplit(":", 1)[1])
+    data = await exercise_statistics(session, callback.from_user.id, exercise_id)
+    if data is None:
+        await callback.answer("Упражнение недоступно", show_alert=True)
+        return
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_exercise_statistics_message(data),
+        )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "stats:reset:confirm")

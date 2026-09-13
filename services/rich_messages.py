@@ -546,8 +546,46 @@ def build_stats_message(
             f"<h4>{month_names[month.month - 1]}</h4>"
             f"<table compact><tr>{headers}</tr>{''.join(rows)}</table>"
             "<footer>✅ выполнено · ◐ частично · ✕ пропущено · * сегодня в процессе<br>"
-            f'<a href="{escape(reset_link, quote=True)}">Сбросить статистику</a></footer>'
+            '<tg-button-row><tg-button type="callback_data" data="stats:exercises">Статистика упражнений</tg-button></tg-button-row>'
+            f'<footer><a href="{escape(reset_link, quote=True)}">Сбросить статистику</a></footer>'
         )
+    )
+
+
+def build_exercise_statistics_picker(exercises: list[Exercise]) -> InputRichMessage:
+    rows = [
+        f'<tg-button-row><tg-button type="callback_data" data="stats:exercise:{exercise.id}">{escape(exercise.name)}</tg-button></tg-button-row>'
+        for exercise in exercises
+    ]
+    return simple_rich(
+        "Статистика упражнений",
+        "<p>Выбери упражнение.</p>",
+        "".join(rows) or "<p>Упражнений пока нет.</p>",
+    )
+
+
+def build_exercise_statistics_message(data: dict) -> InputRichMessage:
+    load = "—" if data["load_best"] is None else f'{data["load_best"]:g} {data["unit"]}'
+    last = data["last_date"].strftime("%d.%m.%Y") if data["last_date"] else "—"
+    preset_rows = "".join(
+        f'<tr><td>{preset.position}</td><td>{"—" if preset.load_value is None else f"{preset.load_value:g} {data["unit"]}"}</td><td>{"—" if preset.repetitions is None else preset.repetitions}</td></tr>'
+        for preset in data["presets"]
+    ) or '<tr><td colspan="3">Нет завершённых подходов</td></tr>'
+    current_table = (
+        "<h4>Текущие данные подходов</h4>"
+        "<table compact bordered><tr><th>Подход</th><th>Нагрузка</th><th>Повторения</th></tr>"
+        f"{preset_rows}</table>"
+    )
+    return simple_rich(
+        data["name"],
+        "<table compact bordered>"
+        f'<tr><td>Завершено подходов</td><td align="right"><b>{data["sets_done"]}</b></td></tr>'
+        f'<tr><td>Всего повторений</td><td align="right"><b>{data["repetitions_total"]}</b></td></tr>'
+        f'<tr><td>Лучший подход</td><td align="right"><b>{data["repetitions_best"]} повторений</b></td></tr>'
+        f'<tr><td>Макс. нагрузка</td><td align="right"><b>{load}</b></td></tr>'
+        f'<tr><td>Последняя тренировка</td><td align="right"><b>{last}</b></td></tr>'
+        "</table>" + current_table,
+        '<tg-button-row><tg-button type="callback_data" data="stats:exercises">Все упражнения</tg-button></tg-button-row>',
     )
 
 
