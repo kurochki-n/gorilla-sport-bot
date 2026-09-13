@@ -448,7 +448,11 @@ async def switch_workout_exercise(
         .join(WorkoutSession)
         .where(WorkoutExercise.id == workout_exercise_id, WorkoutSession.user_id == user_id)
     )
-    if workout_exercise is None or workout_exercise.training_day_exercise is None:
+    if (
+        workout_exercise is None
+        or workout_exercise.sets_done > 0
+        or workout_exercise.training_day_exercise is None
+    ):
         return None
     source = workout_exercise.training_day_exercise
     choices = [source.exercise] + [item.exercise for item in source.alternatives]

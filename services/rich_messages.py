@@ -374,12 +374,17 @@ def build_workout_exercise(
             buttons.append(
                 f'<tg-button type="callback_data" style="primary" data="workout:set:{workout_set.id}">{workout_set.position}</tg-button>'
             )
-    action_buttons = (
+    details_button = (
         f'<tg-button type="callback_data" data="exercise:details:{item.exercise_id}">Описание и медиа</tg-button>'
     )
-    if item.training_day_exercise and item.training_day_exercise.alternatives:
-        action_buttons += (
-            f'<tg-button type="callback_data" style="primary" data="workout:replace:{item.id}">Заменить</tg-button>'
+    replace_button = ""
+    if (
+        item.sets_done == 0
+        and item.training_day_exercise
+        and item.training_day_exercise.alternatives
+    ):
+        replace_button = (
+            f'<tg-button-row align="right"><tg-button type="callback_data" style="primary" data="workout:replace:{item.id}">Заменить</tg-button></tg-button-row>'
         )
     previous = (
         f'<tg-button type="callback_data" data="workout:nav:{workout_session.id}:{position - 1}">←</tg-button>'
@@ -396,7 +401,8 @@ def build_workout_exercise(
         f"<p><b>{position}/{len(exercises)} · {escape(item.muscle_group_name)}</b>{streak_text}</p>",
         f"<p><b>{escape(item.exercise_name)}{complete_mark}</b><br>"
         f"{item.sets_total} подхода × {escape(item.target_text)} · отдых {item.rest_seconds} сек</p>",
-        f'<tg-button-row align="left">{action_buttons}</tg-button-row>',
+        replace_button,
+        f'<tg-button-row align="left">{details_button}</tg-button-row>',
     ]
     for offset in range(0, len(buttons), 6):
         blocks.append(
