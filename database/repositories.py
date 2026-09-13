@@ -375,9 +375,6 @@ async def generate_workout_session(
         training_day.id,
         scheduled_date,
     )
-    if existing is not None:
-        return existing
-
     alternative_ids = set(
         await session.scalars(
             select(TrainingDayExerciseAlternative.exercise_id)
@@ -394,6 +391,11 @@ async def generate_workout_session(
     ]
     if not selected_exercises:
         return None
+    if existing is not None:
+        if existing.sets_done > 0 or len(existing.exercises) == len(selected_exercises):
+            return existing
+        await session.delete(existing)
+        await session.flush()
 
     workout = WorkoutSession(
         user_id=training_day.user_id,
@@ -427,6 +429,21 @@ async def generate_workout_session(
 
     await session.commit()
     return await get_workout_session(session, training_day.user_id, workout.id)
+
+
+async def restart_workout_session(
+    session: AsyncSession, user_id: int, workout_session_id: int
+) -> WorkoutSession | None:
+    workout = await get_workout_session(session, user_id, workout_session_id)
+    if workout is None:
+        return None
+    training_day = await get_training_day(session, user_id, workout.training_day_id)
+    if training_day is None or not training_day.is_active:
+        return None
+    scheduled_date = workout.scheduled_date
+    await session.delete(workout)
+    await session.flush()
+    return await generate_workout_session(session, training_day, scheduled_date)
 
 
 async def switch_workout_exercise(

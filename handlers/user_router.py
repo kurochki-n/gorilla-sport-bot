@@ -36,6 +36,7 @@ from database.repositories import (
     get_workout_session,
     mark_workout_set_done,
     reset_statistics,
+    restart_workout_session,
     switch_workout_exercise,
     update_exercise_content,
     upsert_user,
@@ -1563,6 +1564,24 @@ async def begin_workout(callback: CallbackQuery, session: AsyncSession) -> None:
     workout_id = int(callback.data.rsplit(":", 1)[1])
     workout = await get_workout_session(session, callback.from_user.id, workout_id)
     if workout is None or not workout.exercises:
+        await callback.answer("Тренировка недоступна", show_alert=True)
+        return
+    current_streak, _ = await streaks(
+        session, callback.from_user.id, workout.scheduled_date
+    )
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_workout_exercise(workout, 1, current_streak),
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("workout:restart:"))
+async def restart_workout(callback: CallbackQuery, session: AsyncSession) -> None:
+    workout_id = int(callback.data.rsplit(":", 1)[1])
+    workout = await restart_workout_session(session, callback.from_user.id, workout_id)
+    if workout is None:
         await callback.answer("Тренировка недоступна", show_alert=True)
         return
     current_streak, _ = await streaks(
