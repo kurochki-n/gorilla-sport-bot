@@ -65,7 +65,6 @@ from services.rich_messages import (
     build_group_delete_confirmation,
     build_groups_message,
     build_invalid_workout_message,
-    build_motivation_message,
     build_no_workout_message,
     build_stats_message,
     build_training_day_delete_confirmation,
@@ -1643,10 +1642,7 @@ async def show_today(bot, chat_id: int, user_id: int, session: AsyncSession) -> 
             bot, chat_id, build_workout_overview(workout, current_streak)
         )
         workout.telegram_message_id = sent.message_id
-        if workout.sent_at is None and (now.hour, now.minute) >= (
-            training_day.reminder_time.hour,
-            training_day.reminder_time.minute,
-        ):
+        if workout.sent_at is None:
             workout.sent_at = datetime.now(timezone.utc)
         await session.commit()
 
@@ -1818,34 +1814,6 @@ async def complete_set(callback: CallbackQuery, session: AsyncSession) -> None:
         )
 
     if just_workout_completed:
-        today = await local_today(session, callback.from_user.id)
-        data = await stats(session, callback.from_user.id, today)
-        streak = int(data["streak"])
-        best = int(data["best_streak"])
-        milestones = {3, 5, 10, 20, 30, 50, 75, 100}
-        if streak in milestones:
-            title = f"Серия {streak} тренировочных дней"
-            body = "План снова выполнен без пропуска. Ритм уже становится системой."
-        elif streak == best and streak > 1:
-            title = "Новый рекорд серии"
-            body = (
-                f"Личный рекорд обновлён: {streak} тренировочных дней подряд по плану."
-            )
-        elif streak <= 1:
-            title = "Тренировка завершена"
-            body = (
-                "Все подходы закрыты. Первый тренировочный день новой серии выполнен."
-            )
-        else:
-            title = "Тренировка выполнена"
-            body = (
-                f"Все подходы закрыты. Серия продолжается: {streak} тренировочных дней."
-            )
-        await send_rich(
-            callback.bot,
-            callback.from_user.id,
-            build_motivation_message(title, body, streak),
-        )
         await callback.answer("Тренировка выполнена!")
     elif just_exercise_completed and exercise is not None:
         await callback.answer(f"{exercise.exercise_name} выполнено ✓")
