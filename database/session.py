@@ -63,6 +63,21 @@ async def init_db() -> None:
                 text("ALTER TABLE workout_exercises ADD COLUMN load_unit VARCHAR(8) DEFAULT 'кг'")
             )
 
+        training_link_columns = await connection.run_sync(
+            lambda sync_connection: {
+                column["name"]
+                for column in inspect(sync_connection).get_columns("training_day_exercises")
+            }
+        )
+        for column_name, column_type in {
+            "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+            "sets_count": "INTEGER",
+        }.items():
+            if column_name not in training_link_columns:
+                await connection.execute(text(
+                    f"ALTER TABLE training_day_exercises ADD COLUMN {column_name} {column_type}"
+                ))
+
         # Старые тренировочные дни хранили только количество упражнений.
         # Для них один раз закрепляем первые активные упражнения каждой группы.
         await connection.execute(
@@ -90,7 +105,6 @@ async def init_db() -> None:
                     SELECT 1
                     FROM training_day_exercises AS selected
                     WHERE selected.training_day_id = legacy.training_day_id
-                      AND selected.exercise_id = legacy.exercise_id
                 )
                 """
             )

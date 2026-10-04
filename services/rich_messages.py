@@ -277,7 +277,7 @@ def build_training_days_message(training_days: list[TrainingDay]) -> InputRichMe
                 for link in sorted(
                     training_day.muscle_groups, key=lambda item: item.position
                 )
-                if link.muscle_group.is_active
+                if link.muscle_group.is_active and link.exercise_count > 0
             )
             or "нет активных групп"
         )
@@ -287,6 +287,7 @@ def build_training_days_message(training_days: list[TrainingDay]) -> InputRichMe
             f'<tr><td>{escape(mask_to_text(training_day.weekdays_mask))}</td><td align="right">{escape(group_text)}</td></tr>'
             "</table>"
             f'<tg-button-row align="right"><tg-button type="callback_data" style="success" data="day:start:{training_day.id}">Начать</tg-button>'
+            f'<tg-button type="callback_data" data="editday:open:{training_day.id}:0">Редактировать</tg-button>'
             f'<tg-button type="callback_data" style="danger" data="day:delete:{training_day.id}">Удалить</tg-button></tg-button-row>'
         )
     blocks.append(

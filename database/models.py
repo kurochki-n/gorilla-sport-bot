@@ -158,6 +158,9 @@ class TrainingDayExercise(Base, TimestampMixin):
     )
     position: Mapped[int] = mapped_column(Integer, default=1)
 
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    sets_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     training_day: Mapped[TrainingDay] = relationship(back_populates="exercises")
     exercise: Mapped[Exercise] = relationship(back_populates="training_day_links")
     alternatives: Mapped[list["TrainingDayExerciseAlternative"]] = relationship(

@@ -10,6 +10,7 @@ from aiogram.types import BotCommand
 from config_reader import get_settings
 from database.session import close_db, init_db
 from handlers.user_router import router as user_router
+from handlers.training_editor import router as training_editor_router
 from middlewares.db import DbSessionMiddleware
 from services.scheduler import scheduler_loop
 
@@ -45,6 +46,7 @@ async def main() -> None:
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware())
+    dp.include_router(training_editor_router)
     dp.include_router(user_router)
 
     scheduler_task = asyncio.create_task(scheduler_loop(bot), name="workout-scheduler")

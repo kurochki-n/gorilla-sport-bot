@@ -305,6 +305,12 @@ async def get_training_day(
             .selectinload(TrainingDayExercise.exercise)
             .selectinload(Exercise.muscle_group),
         )
+        .options(
+            selectinload(TrainingDay.exercises)
+            .selectinload(TrainingDayExercise.alternatives)
+            .selectinload(TrainingDayExerciseAlternative.exercise)
+        )
+        .execution_options(populate_existing=True)
         .where(TrainingDay.id == training_day_id, TrainingDay.user_id == user_id)
     )
 
@@ -397,13 +403,9 @@ async def generate_workout_session(
         training_day.id,
         scheduled_date,
     )
-    alternative_ids = set(
-        await session.scalars(
-            select(TrainingDayExerciseAlternative.exercise_id)
-            .join(TrainingDayExercise)
-            .where(TrainingDayExercise.training_day_id == training_day.id)
-        )
-    )
+    # Созданная тренировка — снимок плана; редактирование шаблона не меняет историю.
+    if existing is not None:
+        return existing
     group_limit_rows = await session.execute(
         select(TrainingDayGroup.muscle_group_id, TrainingDayGroup.exercise_count).where(
             TrainingDayGroup.training_day_id == training_day.id
@@ -419,7 +421,7 @@ async def generate_workout_session(
         exercise = link.exercise
         group_id = exercise.muscle_group_id
         if (
-            exercise.id in alternative_ids
+            not link.is_active
             or not exercise.is_active
             or not exercise.muscle_group.is_active
             or group_id not in group_limits
@@ -431,40 +433,6 @@ async def generate_workout_session(
     selected_exercises = [link.exercise for link in selected_links]
     if not selected_exercises:
         return None
-    if existing is not None:
-        selected_link_ids = {link.id for link in selected_links}
-        selected_exercise_ids = {exercise.id for exercise in selected_exercises}
-        extras = [
-            item
-            for item in existing.exercises
-            if (
-                item.training_day_exercise_id not in selected_link_ids
-                if item.training_day_exercise_id is not None
-                else item.exercise_id not in selected_exercise_ids
-            )
-        ]
-        if extras:
-            for item in extras:
-                await session.delete(item)
-            await session.flush()
-            for position, item in enumerate(
-                (item for item in existing.exercises if item not in extras), start=1
-            ):
-                item.position = position
-            existing_id = existing.id
-            await session.commit()
-            session.expire_all()
-            existing = await get_workout_session(
-                session, training_day.user_id, existing_id
-            )
-        if existing is not None and (
-            existing.sets_done > 0 or len(existing.exercises) == len(selected_exercises)
-        ):
-            return existing
-        if existing is not None:
-            await session.delete(existing)
-            await session.flush()
-
     workout = WorkoutSession(
         user_id=training_day.user_id,
         training_day_id=training_day.id,
@@ -473,7 +441,9 @@ async def generate_workout_session(
     session.add(workout)
     await session.flush()
 
-    for position, exercise in enumerate(selected_exercises, start=1):
+    for position, link in enumerate(selected_links, start=1):
+        exercise = link.exercise
+        sets_count = link.sets_count or exercise.default_sets
         workout_exercise = WorkoutExercise(
             session_id=workout.id,
             exercise_id=exercise.id,
@@ -483,7 +453,7 @@ async def generate_workout_session(
             muscle_group_id=exercise.muscle_group_id,
             exercise_name=exercise.name,
             muscle_group_name=exercise.muscle_group.name,
-            sets_total=exercise.default_sets,
+            sets_total=sets_count,
             target_text=exercise.target_text,
             rest_seconds=exercise.rest_seconds,
             load_unit=exercise.load_unit,
@@ -491,7 +461,7 @@ async def generate_workout_session(
         )
         session.add(workout_exercise)
         await session.flush()
-        for set_position in range(1, exercise.default_sets + 1):
+        for set_position in range(1, sets_count + 1):
             previous_set = await session.scalar(
                 select(ExerciseSetPreset).where(
                     ExerciseSetPreset.user_id == training_day.user_id,
@@ -557,7 +527,10 @@ async def switch_workout_exercise(
     ):
         return None
     source = workout_exercise.training_day_exercise
-    choices = [source.exercise] + [item.exercise for item in source.alternatives]
+    choices = [
+        exercise for exercise in [source.exercise] + [item.exercise for item in source.alternatives]
+        if exercise.is_active and exercise.muscle_group.is_active
+    ]
     if len(choices) < 2:
         return None
     current_index = next(
@@ -569,7 +542,7 @@ async def switch_workout_exercise(
     workout_exercise.muscle_group_id = replacement.muscle_group_id
     workout_exercise.exercise_name = replacement.name
     workout_exercise.muscle_group_name = replacement.muscle_group.name
-    workout_exercise.sets_total = replacement.default_sets
+    # Замена сохраняет количество подходов из снимка этой тренировки.
     workout_exercise.target_text = replacement.target_text
     workout_exercise.rest_seconds = replacement.rest_seconds
     workout_exercise.load_unit = replacement.load_unit
@@ -580,7 +553,7 @@ async def switch_workout_exercise(
         delete(WorkoutSet).where(WorkoutSet.workout_exercise_id == workout_exercise.id)
     )
     await session.flush()
-    for position in range(1, replacement.default_sets + 1):
+    for position in range(1, workout_exercise.sets_total + 1):
         session.add(WorkoutSet(workout_exercise_id=workout_exercise.id, position=position))
     session_id = workout_exercise.session_id
     await session.commit()
