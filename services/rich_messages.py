@@ -395,7 +395,13 @@ def build_workout_exercise(
     streak_text = f" · 🔥 <b>{streak}</b>" if streak else ""
     complete_mark = " ✅" if item.is_completed else ""
     ordered_sets = sorted(item.sets, key=lambda set_item: set_item.position)
-    workout_set = next((set_item for set_item in ordered_sets if not set_item.is_done), ordered_sets[-1])
+    pending_note = next(
+        (set_item for set_item in ordered_sets if set_item.is_done and set_item.load_note is None),
+        None,
+    )
+    workout_set = pending_note or next(
+        (set_item for set_item in ordered_sets if not set_item.is_done), ordered_sets[-1]
+    )
     unit = item.load_unit or "—"
     load = "—" if workout_set.load_value is None else f"{workout_set.load_value:g} {unit}"
     reps = "—" if workout_set.repetitions is None else str(workout_set.repetitions)
@@ -404,15 +410,37 @@ def build_workout_exercise(
         f"<tr><td>{workout_set.position}/{len(ordered_sets)}</td><td>{load}</td><td>{reps}</td></tr>",
         "</table>",
     ]
+    note_labels = {
+        "decrease": "Уменьшить нагрузку",
+        "keep": "Оставить нагрузку",
+        "increase": "Увеличить нагрузку",
+    }
+    previous_note = note_labels.get(workout_set.previous_load_note, "Нет заметки")
+    set_rows.append(f"<p>Предыдущая заметка по этому подходу: <b>{previous_note}</b>.</p>")
     control_rows: list[str] = []
-    if not workout_set.is_done:
+    if pending_note is not None:
         control_rows = [
-            f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:load:-">Нагрузка −</tg-button></tg-button-row>',
-            f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:load:+">Нагрузка +</tg-button></tg-button-row>',
+            "<p>Подход выполнен ✓. Как изменить нагрузку на следующую тренировку?</p>",
+            '<tg-button-row>' + ''.join(
+                f'<tg-button type="callback_data" data="workout:note:{workout_set.id}:{note}">{label}</tg-button>'
+                for note, label in note_labels.items()
+            ) + '</tg-button-row>',
+        ]
+    elif not workout_set.is_done:
+        load_rows = [
+            '<tg-button-row>' + ''.join(
+                f'<tg-button type="callback_data" data="workout:value:{workout_set.id}:load:{delta:+g}">{delta:+g}</tg-button>'
+                for delta in deltas
+            ) + '</tg-button-row>'
+            for deltas in ((-1, -2.5, -5), (1, 2.5, 5))
+        ]
+        control_rows = load_rows + [
             f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:-">Повторения −</tg-button></tg-button-row>',
             f'<tg-button-row><tg-button type="callback_data" data="workout:value:{workout_set.id}:reps:+">Повторения +</tg-button></tg-button-row>',
             f'<tg-button-row><tg-button type="callback_data" style="success" data="workout:set:{workout_set.id}">Завершить подход</tg-button></tg-button-row>',
         ]
+    if workout_set.load_note in note_labels:
+        set_rows.append(f"<p>На следующую тренировку: <b>{note_labels[workout_set.load_note]}</b>.</p>")
     action_buttons = ""
     if (
         item.sets_done == 0

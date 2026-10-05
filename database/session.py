@@ -134,6 +134,8 @@ async def init_db() -> None:
         for column_name, column_type in {
             "load_value": "FLOAT",
             "repetitions": "INTEGER",
+            "previous_load_note": "VARCHAR(16)",
+            "load_note": "VARCHAR(16)",
         }.items():
             if column_name not in workout_set_columns:
                 await connection.execute(

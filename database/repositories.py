@@ -392,6 +392,26 @@ def _default_repetitions(target_text: str) -> int | None:
     return int(match.group()) if match else None
 
 
+async def _previous_load_note(
+    session: AsyncSession, user_id: int, exercise_id: int, position: int,
+    scheduled_date: date,
+) -> str | None:
+    return await session.scalar(
+        select(WorkoutSet.load_note)
+        .join(WorkoutExercise).join(WorkoutSession)
+        .where(
+            WorkoutSession.user_id == user_id,
+            WorkoutSession.scheduled_date < scheduled_date,
+            WorkoutExercise.exercise_id == exercise_id,
+            WorkoutSet.position == position,
+            WorkoutSet.is_done.is_(True),
+            WorkoutSet.load_note.is_not(None),
+        )
+        .order_by(WorkoutSession.scheduled_date.desc(), WorkoutSet.completed_at.desc(), WorkoutSet.id.desc())
+        .limit(1)
+    )
+
+
 async def generate_workout_session(
     session: AsyncSession,
     training_day: TrainingDay,
@@ -474,6 +494,9 @@ async def generate_workout_session(
                     workout_exercise_id=workout_exercise.id,
                     position=set_position,
                     load_value=previous_set.load_value if previous_set else None,
+                    previous_load_note=await _previous_load_note(
+                        session, training_day.user_id, exercise.id, set_position, scheduled_date
+                    ),
                     repetitions=(
                         previous_set.repetitions
                         if previous_set and previous_set.repetitions is not None
@@ -554,7 +577,14 @@ async def switch_workout_exercise(
     )
     await session.flush()
     for position in range(1, workout_exercise.sets_total + 1):
-        session.add(WorkoutSet(workout_exercise_id=workout_exercise.id, position=position))
+        session.add(WorkoutSet(
+            workout_exercise_id=workout_exercise.id,
+            position=position,
+            previous_load_note=await _previous_load_note(
+                session, user_id, replacement.id, position,
+                workout_exercise.session.scheduled_date,
+            ),
+        ))
     session_id = workout_exercise.session_id
     await session.commit()
     session.expire_all()
@@ -599,7 +629,7 @@ async def set_workout_exercise_unit(
 
 
 async def adjust_workout_set_value(
-    session: AsyncSession, user_id: int, set_id: int, field: str, delta: int
+    session: AsyncSession, user_id: int, set_id: int, field: str, delta: float
 ) -> WorkoutSession | None:
     workout_set = await session.scalar(
         select(WorkoutSet)
@@ -609,10 +639,32 @@ async def adjust_workout_set_value(
     )
     if workout_set is None or workout_set.is_done or field not in {"load", "reps"}:
         return None
+    allowed_deltas = {-5, -2.5, -1, 1, 2.5, 5} if field == "load" else {-1, 1}
+    if delta not in allowed_deltas:
+        return None
     if field == "load":
-        workout_set.load_value = max(0, (workout_set.load_value or 0) + delta * 2.5)
+        workout_set.load_value = max(0, (workout_set.load_value or 0) + delta)
     else:
-        workout_set.repetitions = max(0, (workout_set.repetitions or 0) + delta)
+        workout_set.repetitions = max(0, (workout_set.repetitions or 0) + int(delta))
+    session_id = workout_set.workout_exercise.session_id
+    await session.commit()
+    return await get_workout_session(session, user_id, session_id)
+
+
+async def set_workout_set_note(
+    session: AsyncSession, user_id: int, set_id: int, note: str
+) -> WorkoutSession | None:
+    if note not in {"decrease", "keep", "increase"}:
+        return None
+    workout_set = await session.scalar(
+        select(WorkoutSet)
+        .options(selectinload(WorkoutSet.workout_exercise))
+        .join(WorkoutExercise).join(WorkoutSession)
+        .where(WorkoutSet.id == set_id, WorkoutSession.user_id == user_id)
+    )
+    if workout_set is None or not workout_set.is_done:
+        return None
+    workout_set.load_note = note
     session_id = workout_set.workout_exercise.session_id
     await session.commit()
     return await get_workout_session(session, user_id, session_id)

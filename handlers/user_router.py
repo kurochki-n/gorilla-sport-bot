@@ -39,6 +39,7 @@ from database.repositories import (
     reset_statistics,
     restart_workout_session,
     set_workout_exercise_unit,
+    set_workout_set_note,
     switch_workout_exercise,
     update_exercise_content,
     update_exercise_field,
@@ -1769,9 +1770,19 @@ async def set_workout_unit(callback: CallbackQuery, session: AsyncSession) -> No
 
 @router.callback_query(F.data.startswith("workout:value:"))
 async def adjust_workout_value(callback: CallbackQuery, session: AsyncSession) -> None:
-    _, _, set_id, field, sign = callback.data.split(":")
+    _, _, set_id, field, value = callback.data.split(":")
+    # Старые сообщения используют только знак и шаг нагрузки 2,5.
+    try:
+        if value in {"+", "-"}:
+            step = 2.5 if field == "load" else 1
+            delta = step if value == "+" else -step
+        else:
+            delta = float(value)
+    except ValueError:
+        await callback.answer("Недопустимое изменение нагрузки", show_alert=True)
+        return
     workout = await adjust_workout_set_value(
-        session, callback.from_user.id, int(set_id), field, 1 if sign == "+" else -1
+        session, callback.from_user.id, int(set_id), field, delta
     )
     if workout is None:
         await callback.answer("Подход уже закрыт", show_alert=True)
@@ -1781,6 +1792,28 @@ async def adjust_workout_value(callback: CallbackQuery, session: AsyncSession) -
     if callback.message:
         await edit_rich(callback.bot, callback.message.chat.id, callback.message.message_id, build_workout_exercise(workout, exercise.position, current_streak))
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("workout:note:"))
+async def save_workout_note(callback: CallbackQuery, session: AsyncSession) -> None:
+    _, _, set_id, note = callback.data.split(":")
+    workout = await set_workout_set_note(
+        session, callback.from_user.id, int(set_id), note
+    )
+    if workout is None:
+        await callback.answer("Не удалось сохранить заметку", show_alert=True)
+        return
+    exercise = next(
+        item for item in workout.exercises
+        if any(item_set.id == int(set_id) for item_set in item.sets)
+    )
+    current_streak, _ = await streaks(session, callback.from_user.id, workout.scheduled_date)
+    if callback.message:
+        await edit_rich(
+            callback.bot, callback.message.chat.id, callback.message.message_id,
+            build_workout_exercise(workout, exercise.position, current_streak),
+        )
+    await callback.answer("Заметка сохранена")
 
 
 @router.callback_query(F.data.startswith("workout:set:"))

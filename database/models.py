@@ -292,6 +292,8 @@ class WorkoutSet(Base, TimestampMixin):
     position: Mapped[int] = mapped_column(Integer)
     load_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previous_load_note: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    load_note: Mapped[str | None] = mapped_column(String(16), nullable=True)
     is_done: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
